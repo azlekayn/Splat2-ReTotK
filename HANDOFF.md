@@ -244,8 +244,14 @@ Two visual defects to fix (user-reported, confirmed in the frames):
   (the shadow term looks like 0 with no ambient/indirect contribution). Suspect the shadow-map
   sample/compare or the ambient term in the deferred GBuffer path (game lighting constants are
   lifted, so check the renderer side first). Not yet investigated.
-- Some UI text was reported missing on one screen; the captured frames all show text, so it is
-  screen-specific (needs a frame from that screen).
+- **Missing text is the yes/no button labels** at the end of character creation: on the confirm
+  screen (`frame_00600.png`) the question and hints render, but the two button blobs (green splat /
+  purple) have no labels. So it is element-specific, not a global font failure. Candidates: those
+  labels use a different font size/face whose atlas path differs; the label colour/alpha is zero; or
+  the label control is (again) not instantiated. Probe: dump the PlayerMake layout's panes/controls
+  for the confirm page (as was done for the customize page) and/or a cropped frame of the buttons.
+  Note only 2 `nvnTextureWriteTexels` calls appear in the run, so the glyph atlas is written through
+  guest-heap memory (copied per draw) rather than WriteTexels.
 
 Next milestone: get through PlayerMake into the tutorial 3D room, then plaza (plan 4–5). Known-small
 gaps seen in the log:

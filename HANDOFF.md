@@ -207,8 +207,21 @@ definition of the base register is a `mov`, not the `adrp`).
 `mov <scan_reg>, xOther` copies while keeping the load's base for the `add d,d,base` anchor test.
 Regenerating `main` resolves 5 more tables (`br_jumptable` 1108 → 1113, `br_indirect` 6360 → 6355);
 `GBuffer::expand`'s dispatch at `0xf862e0` is now a C `switch` to `L_f862e4/…/L_f8632c`. Note the
-generator needs `capstone` (`pip3 install capstone` inside the build container). Rebuild started as
-`boot-null-70`. `TOTK_IND_LOG=1` rings the last 32 indirect calls if another such table appears.
+generator needs `capstone` (`pip3 install capstone` inside the build container). `TOTK_IND_LOG=1`
+rings the last 32 indirect calls if another such table appears.
+
+**After that fix the boot runs the 3D title scene with no crash.** `work/logs/boot-null-70.log`
+(120 s): 5 presents (`present #N tex 1920x1080`), real draws (`nvnCommandBufferDrawElementsInstanced`),
+stable `[vsync]`, and `work/logs/vk-04.log` (Vulkan): `[nvn] first present (texture 0)` with 4 draws.
+
+**Current blocker: a hang after a few frames, not a crash.** The presents stop early (headless: all 5
+inside lines 1474–1522 of 1967; Vulkan: the hang watchdog closed it after 30 s with no frame). The
+hang report (`vk-04.log`) shows the main thread on a host `pthread_cond_wait` reached through
+`nn::atk` audio setup — `SoundThread::RegisterThreadBeginUserCallback` /
+`SoundSystem::ClearSoundThreadBeginUserCallback` / `StreamSoundRuntime::SetupStreamBuffer`
+(main `0xe288c8`, `0xe1e418`, `0xe48c94`) — i.e. an audio sound-thread callback wait that never
+signals. Next session: trace that `nn::atk` path and the `nn::os` mutex/event it waits on
+(`LARECOMP_HANG_EXIT_S=0` keeps a hung run alive for inspection).
 
 ## Runtime work already done (all game-agnostic; TotK behaviour preserved)
 

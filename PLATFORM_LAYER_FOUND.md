@@ -166,6 +166,9 @@ corrupt table the old converter produced.
 - This does **not** mean the port boots by itself: the recompiled runtime, NVN backend and
   boot wiring are still required. It means the contract is no longer based only on call
   sites.
+- [PLATFORM_BODY_NOTES.md](PLATFORM_BODY_NOTES.md) starts the body-level cross-check. Its
+  first result is a real difference: the retail `StandardAllocator` is a free-list
+  allocator, while `port/`'s is a bump allocator that never reuses freed memory.
 
 ---
 

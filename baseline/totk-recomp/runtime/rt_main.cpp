@@ -357,6 +357,23 @@ static void on_crash_signal(int sig, siginfo_t* si, void* uc) {
         }
     }
     rt_ind_dump();
+    // Strings in the crashing frame (layout/control names, paths): the failing lookup's name is usually still on the
+    // guest stack. Printable ASCII runs of 4+ bytes, deduplicated, bounded so a crash report stays readable.
+    if (Ctx* c = t_ctx) {
+        u64 lo = c->sp, hi = c->sp + 0x800;
+        int shown = 0;
+        for (u64 a = lo; a < hi && shown < 24; ) {
+            if (!rt_posix_readable(a, 1)) break;
+            const u8* p = (const u8*)a;
+            int n = 0;
+            while (a + n < hi && n < 96 && p[n] >= 0x20 && p[n] < 0x7f) n++;
+            if (n >= 4) {
+                fprintf(stderr, "[stack] %llx \"%.*s\"\n", (unsigned long long)(a - lo), n, (const char*)p);
+                shown++;
+                a += n + 1;
+            } else a++;
+        }
+    }
     fflush(stderr);
     _exit(3);
 }

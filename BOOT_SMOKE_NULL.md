@@ -82,6 +82,25 @@ TOTK_ROMFS=<work>/base-nsp/romfs TOTK_IMG=<work>/img TOTK_HEADLESS=1 \
 `TOTK_NVN_INT="0=53"` is a stopgap: `nvnDeviceGetInteger(dev, 0)` is the NVN API **major**, and
 Splatoon 2 requires 53 where TotK requires 55. It belongs in the game definition, not an env var.
 
+## Vulkan build: window and device work, same UI blocker
+
+`build-vk` links (137 MB) and runs with a window: `[vk] Intel(R) Arc(tm) Graphics (MTL),
+swapchain 1280x720`, then NVN device init and the API version check (53) pass. It then stops at
+the same `Cui::CustomizePartsSet::onInitialize` (`main 0x1d9530`) null, so **the first frame is
+behind a UI-tree problem, not a graphics problem**.
+
+Evidence gathered for it:
+
+- the failing name (from a printable-string scan of the crashing guest frame, `[stack]` lines in
+  the crash report) is `/L_ItemBtn_00`, i.e. the first of 24 slots the loop looks up;
+- with `TOTK_TRACE_FS=1` the game does load `Layout/*.szs` (sound banks for
+  `Cst_CustomizeTV_00` enumerate that layout's children), but
+  `content:/Layout/Cst_CustomizeDetail_00.Nin_NX_NVNV.szs` — the layout that owns those item
+  buttons — is **never opened** before `CustomizeMainPage::onInitialize` runs.
+
+So the next question is the page-manager order: why is `CustomizeMainPage` initialized before its
+detail layout is loaded (or which earlier result makes the page manager take this path at boot).
+
 ## Next
 
 1. Game definition: title/build ids, six modules, heap/alias/pool, 1280x720/60, NVN API 53, and

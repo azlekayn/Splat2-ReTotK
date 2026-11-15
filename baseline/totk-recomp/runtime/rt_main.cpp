@@ -218,14 +218,40 @@ extern "C" [[noreturn]] void rt_fatal_guest(const char* msg) {
     ExitProcess(4);
 }
 // gen.py --trace hook: entry (x0-x7, lr) and ret (x0) of selected functions; TOTK_TRACE_MAX lines per function
+// TOTK_TRACE_STR=1: with --trace, also print any of x1..x3 that looks like a guest C string. Layout/resource APIs take
+// names by pointer, and a hex-only trace of those calls says nothing about which name was requested.
+extern "C" u64 g_rt_heap_base;   // hle_os_mem.cpp (also declared below; this one is needed by the helper above it)
+static bool trace_str_at(const u64 a, const char** out) {
+    if (a < 0x1000) return false;
+    if (!rt_posix_readable(a, 8)) return false;
+    const u8* p = (const u8*)a;
+    if (p[0] < 0x20 || p[0] >= 0x7f) return false;   // not characters: try a SafeStringBase (chars pointer at +8)
+    int n = 0;
+    while (n < 64 && rt_posix_readable(a + n, 1) && p[n] >= 0x20 && p[n] < 0x7f) n++;
+    if (n >= 4 && rt_posix_readable(a + n, 1) && p[n] == 0) { *out = (const char*)a; return true; }
+    return false;
+}
+static bool trace_str(const u64 a) {
+    const char* s = nullptr;
+    if (trace_str_at(a, &s)) { printf("[trace %5lu]   \"%s\"\n", GetCurrentThreadId(), s); return true; }
+    // SafeStringBase / std::string-like: the characters are behind a pointer in the object
+    if (!rt_posix_readable(a, 16)) return false;
+    const u64 inner = ((const u64*)a)[1];
+    if (inner && trace_str_at(inner, &s)) { printf("[trace %5lu]   \"%s\"\n", GetCurrentThreadId(), s); return true; }
+    return false;
+}
 void rt_trace(Ctx* c, u64 fn, int ret) {
     static std::unordered_map<u64, int> n; static std::mutex m;
     static int maxn = getenv("TOTK_TRACE_MAX") ? atoi(getenv("TOTK_TRACE_MAX")) : 200;
+    static bool want_str = getenv("TOTK_TRACE_STR") != nullptr;
     std::lock_guard<std::mutex> l(m);
     if (n[fn * 2 + ret]++ >= maxn) return;
-    if (!ret) printf("[trace %5lu] > %llx(%llx, %llx, %llx, %llx, %llx, %llx, %llx, %llx) lr=%llx\n", GetCurrentThreadId(), fn,
-                     c->x[0], c->x[1], c->x[2], c->x[3], c->x[4], c->x[5], c->x[6], c->x[7], c->x[30]);
-    else printf("[trace %5lu] < %llx = %llx\n", GetCurrentThreadId(), fn, c->x[0]);
+    if (!ret) {
+        printf("[trace %5lu] > %llx(%llx, %llx, %llx, %llx, %llx, %llx, %llx, %llx) lr=%llx\n", GetCurrentThreadId(), fn,
+               c->x[0], c->x[1], c->x[2], c->x[3], c->x[4], c->x[5], c->x[6], c->x[7], c->x[30]);
+        if (want_str)
+            for (int i = 0; i <= 3; i++) trace_str(c->x[i]);
+    } else printf("[trace %5lu] < %llx = %llx\n", GetCurrentThreadId(), fn, c->x[0]);
 }
 // TPIDRRO_EL0 for lifted sdk code: Horizon's per-thread 0x200-byte ThreadLocalRegion (sdk keeps its thread pointer
 // at +0x1F0). One per host thread (guest threads are host threads).

@@ -101,11 +101,15 @@ Result (`work/logs/boot-null-61.log/.err`, instrumented build `build-trace`):
   `TryJamMessageQueue` (`runtime/hle_os_thread.cpp`) let the scene framework start
   (`SceneLoadInCalc`, `SceneGeneralMain/Sub1/Sub2`) and the game issue its **first frame**:
   `work/logs/boot-null-67.log` has `[nvn] first present (texture 0)` and 69 `nvnCommand` records
-  (headless/null backend records but does not display them). The Vulkan build also reached a
-  rendered frame (`work/logs/vk-03.log`: `first present`, `[hitch] frame 1 … 1 draws`, present
-  1..8, title-phase `saveMount:/save.dat`), then faulted on a sead worker thread in
-  `Lp::Utl::PlayReportWrapper::addBool` (`main 0x12cd3f4`) after `nn::prepo::PlayReport::addBool`
-  returned error `0x81` — a telemetry/prepo issue, not the UI.
+  (headless/null backend records but does not display them).
+- after that the title flow stalled after a few frames. Two more runtime gaps cleared it: the
+  `Lp::Utl::PlayReportWrapper` abort on `nn::prepo::PlayReport::Add` failure (telemetry — un-lifted
+  the `Add*` overloads) and the **1-arg `nn::os::ReleaseSemaphore(SemaphoreType*)`** overload, which
+  was UNIMPL so a semaphore never woke its waiter. Also fixed a generator PIC-jump-table form that
+  made `gsys::GBuffer::expand` trap on a mid-function case label.
+- **Result:** `work/logs/boot-null-71.log` presents **~5,500 frames at 60 Hz** (~92 s, no crash) —
+  the title / 2D-UI-720p60 milestone. Vulkan reaches the same scene with real
+  `nvnCommandBufferDrawElementsInstanced` draws.
 
 (Scratch instrumentation used for this lives in `work/gen-totk/main-trace/` and is not committed;
 `work/logs/boot-trace-*.log` hold the probes. `work/sym.py`, `work/szs_list.py`,

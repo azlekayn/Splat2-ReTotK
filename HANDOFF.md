@@ -214,14 +214,23 @@ rings the last 32 indirect calls if another such table appears.
 (120 s): 5 presents (`present #N tex 1920x1080`), real draws (`nvnCommandBufferDrawElementsInstanced`),
 stable `[vsync]`, and `work/logs/vk-04.log` (Vulkan): `[nvn] first present (texture 0)` with 4 draws.
 
-**Current blocker: a hang after a few frames, not a crash.** The presents stop early (headless: all 5
-inside lines 1474–1522 of 1967; Vulkan: the hang watchdog closed it after 30 s with no frame). The
-hang report (`vk-04.log`) shows the main thread on a host `pthread_cond_wait` reached through
-`nn::atk` audio setup — `SoundThread::RegisterThreadBeginUserCallback` /
-`SoundSystem::ClearSoundThreadBeginUserCallback` / `StreamSoundRuntime::SetupStreamBuffer`
-(main `0xe288c8`, `0xe1e418`, `0xe48c94`) — i.e. an audio sound-thread callback wait that never
-signals. Next session: trace that `nn::atk` path and the `nn::os` mutex/event it waits on
-(`LARECOMP_HANG_EXIT_S=0` keeps a hung run alive for inspection).
+**The post-frame stall was a missing `nn::os::ReleaseSemaphore` overload — fixed.** The game releases
+a semaphore through the *1-arg* `ReleaseSemaphore(SemaphoreType*)`, which was UNIMPL, so the
+semaphore never woke its waiter and the title flow stalled after a handful of frames (the event ring,
+`TOTK_EVRING_DUMP`, showed the UI thread idle from ~0.9 s while workers waited at `main 0x12ff850`).
+Added that overload in `runtime/hle_os_thread.cpp`. Result: `work/logs/boot-null-71.log` presents
+**~3000 frames at 60 Hz** with no crash (vsync steady, no fault). This is the title / 2D-UI-at-720p60
+milestone.
+
+**Vulkan verified:** `work/logs/vk-05.log` (build-vk, Intel Arc, 1280x720 window) runs the same
+scene at `present #3880: 60.0 fps`, 3949 frames in 70 s, 18029 draws / 6897 passes, no crash — the
+**title / 2D-UI-720p60 milestone on both backends.**
+
+Next milestone: the tutorial 3D room, then plaza (plan 4–5). Known-small gaps seen in the log:
+`nn::audio::GetAuxSampleRate` (UNIMPL, returns 0), `nn::fs::CommitSaveData` (UNIMPL). One memory
+note: the run logs `texture … finalized while 1 pool slots name it: object kept (10630 kept,
+71391.9 MB of storage)` — finalized-but-referenced textures are retained; RSS reached ~8.9 GB in
+70 s, so this needs attention before long runs (not yet fatal).
 
 ## Runtime work already done (all game-agnostic; TotK behaviour preserved)
 

@@ -104,6 +104,27 @@ owner at +0x10 and releases the lock at +0x18. The port's host mutex has the sam
 observable recursion/ownership behaviour, but its `MutexType` storage is host-chosen; it
 does not reproduce this layout. Worth remembering if anything ever reads the fields.
 
+## Thread API: thin wrappers over an SDK manager
+
+The public thread functions are small wrappers over a global manager object reached
+through `[0x6bf000+184] + 0x68`:
+
+| Symbol | Offset | Notes |
+|---|---:|---|
+| `CreateThread` (6-arg) | 0x815dc | forwards to the manager at 0x2cb07c |
+| `CreateThread` (7-arg) | 0x81580 | same, plus core number |
+| `StartThread` | 0x81648 | manager at 0x2cc67c |
+| `WaitThread` | 0x81910 | manager at 0x2be92c |
+| `DestroyThread` | 0x81630 | manager at 0x2c491c |
+| `GetThreadId` | 0x819d0 | manager at 0x2bcc0c |
+| `SetThreadCoreMask` | 0x81970 | manager at 0x2cc2fc |
+| `GetThreadPriority` | 0x818dc | `ldr w0, [thread, #0x44]` |
+| `GetCurrentThread` | 0x81870 | `mrs tpidrro_el0; ldr x0, [x8, #0x1f8]` |
+
+So the host layer implements the same API and observable semantics, but its `ThreadType`
+and manager are host-side; the retail layout (e.g. priority at +0x44) is not reproduced.
+Worth keeping in mind if the port ever stores or passes a guest `ThreadType` through.
+
 ## Display and graphics entry points
 
 - `nn::vi::OpenDefaultDisplay` (`subsdk1` 0x90a0) is a small IPC wrapper: it passes the
@@ -116,8 +137,9 @@ does not reproduce this layout. Worth remembering if anything ever reads the fie
 
 ## Next candidates
 
-- `nn::os::CreateThread` / `StartThread` / `WaitThread` — the real thread lifecycle behind
-  the host implementation in `port/`.
+- `nn::os::detail::ThreadManager` (the bodies behind the wrappers: 0x2cb07c / 0x2cc67c /
+  0x2be92c / 0x2c491c) — the real thread lifecycle behind the host implementation in
+  `port/`.
 - `nn::vi::CreateLayer` / `GetDisplayVsyncEvent` — the rest of the display boundary.
 - `nn::mem::StandardAllocator::Allocate`'s free-list internals (sdk 0x7becc) — the host
   version now reuses and coalesces, but is not byte-identical to the retail TLSF-like bins.

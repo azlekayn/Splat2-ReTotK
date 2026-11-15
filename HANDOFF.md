@@ -137,10 +137,22 @@ from 23 to ~93 unique layouts (`work/logs/boot-null-61.*`). Full write-up: `UI_B
 ("SOLVED 2026-11-15"). The two earlier hypotheses (operation mode; the absent
 `Cst_CustomizeDetail_00`) were both refuted with assets/traces there.
 
-**Next blocker: SDK service init.** The boot now reaches `nn::friends::Initialize`, whose lifted
-body calls `ConnectToNamedPort("sm:")`; our `svcConnectToNamedPort` returns "no such service", the
-SDK aborts, and the game hits `svc::Break` (`work/logs/boot-null-61.err`). This is an
-unimplemented service (HLE territory), not the UI.
+**The boot now runs a stable main loop with no crash.** After the `isStack` fix it reached
+`nn::friends::Initialize` (its lifted body calls `ConnectToNamedPort("sm:")` and aborts) and then
+`nn::time::GetDeviceLocationName`; those are services whose real bodies need kernel IPC no Linux
+host has. Two follow-ups (runtime only):
+
+- `runtime/hle_os_thread.cpp`: implement the missing auto-clear `nn::os::WaitEvent` /
+  `TimedWaitEvent` / `TryWaitEvent` (the plain `EventType`, distinct from the System/Light/Timer
+  events already HLE'd). They were `UNIMPL` and left the Pia scheduler spinning.
+- `runtime/rt_main.cpp`: add `_ZN2nn7friends`, `_ZN2nn3pia`, `_ZN2nn3nex`, `_ZN2nn4time`,
+  `_ZN2nn3err`, `_ZN2nn4diag` to the `TOTK_LIFT_ALL` service-exclusion list, so their bodies are not
+  lifted (and abort on `sm:`).
+
+Result: the engine reaches `RootTask` init and its `SceneLoad` thread, starts the presentation
+loop, and runs **without crashing** — `work/logs/boot-null-65.log` shows `[vsync] 7200 ticks,
+interval ~16.6 ms` and `[audio] frame 24000` (headless/null backend, so no draws). Next: build the
+Vulkan build and check for a real first frame (`build-vk`, Intel Arc, 1280x720 swapchain).
 
 ## Runtime work already done (all game-agnostic; TotK behaviour preserved)
 

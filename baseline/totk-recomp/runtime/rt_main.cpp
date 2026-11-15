@@ -789,7 +789,8 @@ int main(int argc, char** argv) {
             "_ZN2nn3mii", "_ZN2nn3nfc", "_ZN2nn5movie", "_ZN2nn3cap", "_ZN2nn3web", "_ZN2nn3usb", "_ZN2nn3pcv",
             "_ZN2nn5i2c", "_ZN2nn4gpio", "_ZN2nn3psc", "_ZN2nn5pminfo", "_ZN2nn4spsm", "_ZN2nn2ts",
             "_ZN2nn4htcs", "_ZN2nn3ldr", "_ZN2nn6socket", "_ZN2nn3ssl", "_ZN2nn7account", "_ZN2nn2os",
-            "_ZN2nn2pl", "_ZN2nn5audio",
+            "_ZN2nn2pl", "_ZN2nn5audio", "_ZN2nn7friends", "_ZN2nn3pia", "_ZN2nn3nex",
+            "_ZN2nn4time", "_ZN2nn3err", "_ZN2nn4diag",
         };
         const char* verbose = getenv("TOTK_LIFT_ALL_VERBOSE");
         for (u32 i = 0; i < g_imp_count; i++) {

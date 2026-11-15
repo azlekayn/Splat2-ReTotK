@@ -90,8 +90,12 @@ Result (`work/logs/boot-null-61.log/.err`, instrumented build `build-trace`):
 - `sead::MemUtil::isStack` now returns 1 for stack sources (`logs/bt62.log`: 234 × `ptr=100210292c -> 1`);
 - the customize page constructs, the fs trace goes from 23 to **~93** unique layouts, and the boot
   no longer faults at `main 0x1d9530`;
-- the next blocker is `nn::friends::Initialize` → `ConnectToNamedPort("sm:")` fails →
-  `svc::Break` (`work/logs/boot-null-61.err`), i.e. an unimplemented service, not the UI.
+- the boot then reached service inits whose lifted bodies abort on `sm:`
+  (`nn::friends::Initialize`, then `nn::time::GetDeviceLocationName`). Excluding those service
+  namespaces from `TOTK_LIFT_ALL` (in `rt_main.cpp`'s `kService` list) plus adding the missing
+  auto-clear `nn::os::WaitEvent` HLEs cleared them, and the engine now reaches `RootTask` init and
+  its `SceneLoad` thread and runs **without crashing** (`work/logs/boot-null-65.log`: `[vsync] 7200
+  ticks, ~16.6 ms`, `[audio] frame 24000`; headless, no draws yet).
 
 (Scratch instrumentation used for this lives in `work/gen-totk/main-trace/` and is not committed;
 `work/logs/boot-trace-*.log` hold the probes. `work/sym.py`, `work/szs_list.py`,

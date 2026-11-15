@@ -523,6 +523,14 @@ HLE_AS(os_TimedWaitLightEvent, "_ZN2nn2os19TimedWaitLightEventEPNS0_14LightEvent
     s64 ns = timespan_ns(c->x[1]); c->x[0] = ev_wait(g_event.get(ev), ns < 0 ? 0 : ns);
     evlog('t', ev, lr);
 }
+// Auto-clear EventType (the plain nn::os::Event, as opposed to System/Light/Timer): same host event.
+HLE_AS(os_WaitEvent, "_ZN2nn2os9WaitEventEPNS0_9EventTypeE") {
+    evlog('W', c->x[0], c->x[30]); ev_wait(g_event.get(c->x[0]), -1); evlog('w', c->x[0], c->x[30]);
+}
+HLE_AS(os_TimedWaitEvent, "_ZN2nn2os14TimedWaitEventEPNS0_9EventTypeENS_8TimeSpanE") {
+    s64 ns = timespan_ns(c->x[1]); c->x[0] = ev_wait(g_event.get(c->x[0]), ns < 0 ? -1 : ns);
+}
+HLE_AS(os_TryWaitEvent, "_ZN2nn2os12TryWaitEventEPNS0_9EventTypeE") { c->x[0] = ev_try(g_event.get(c->x[0])); }
 // For HLE modules that own a system event (vi vsync, audio renderer): set it up and signal it from host code.
 void hle_sysevent_init(u64 ev, bool autoclear) { ev_init(ev, false, autoclear ? 1 : 0); }
 void hle_sysevent_signal(u64 ev) { evlog('S', ev, 0); ev_signal(g_event.get(ev)); }

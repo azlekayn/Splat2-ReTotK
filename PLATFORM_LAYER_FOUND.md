@@ -29,6 +29,25 @@ The `sdk` column is the decisive correction: it is **not** "the filesystem servi
 `nn::vi` is not in `sdk` at all; it is in `subsdk1`. That part of the old conclusion was
 right about `sdk`, but the other modules were never searched.
 
+### The whole import list, not just the boot closure
+
+`main` has **784** undefined dynsym entries (its imports). **772 resolve to a definition
+in the dump**:
+
+| Provider | Imports resolved |
+|---|---:|
+| `sdk` | 741 |
+| `subsdk3` | 12 |
+| `subsdk2` | 9 |
+| `subsdk1` | 6 |
+| `subsdk0` | 4 |
+
+The 12 that do not are four linker markers (`__rel_dyn_start`, `__rel_dyn_end`,
+`__rel_plt_start`, `__rel_plt_end`) and the eight `glslc*` shader-compiler functions
+(`glslcInitialize`, `glslcCompile`, …). The `glslc*` misses match the earlier note in
+[RECOMP_BASES_FIXED.md](RECOMP_BASES_FIXED.md); they are not game code. Reproduce with
+`module-map.mjs <dir> --all`.
+
 ---
 
 ## 2. The 51 boot functions, with providers

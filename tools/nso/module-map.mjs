@@ -2,7 +2,7 @@
 //
 // Usage:
 //   node module-map.mjs <dir-with-decompressed-modules> [--worklist PORT_WORKLIST.md]
-//                        [--tsv out.tsv] [--symbol <mangled-or-demangled>]
+//                        [--tsv out.tsv] [--symbol <mangled-or-demangled>] [--all]
 //
 // <dir> must contain decompressed NSO0 files named main, sdk, subsdk0..subsdk3 (missing ones
 // are skipped). Decompress with `hactool -t nso <file> --uncompressed=<file>.decompressed`.
@@ -19,16 +19,18 @@ import { loadNso0 } from "./nso0.mjs";
 const args = process.argv.slice(2);
 const dir = args.find((a) => !a.startsWith("--"));
 if (!dir) {
-  console.error("usage: node module-map.mjs <dir> [--worklist PORT_WORKLIST.md] [--tsv out.tsv] [--symbol name]");
+  console.error("usage: node module-map.mjs <dir> [--worklist PORT_WORKLIST.md] [--tsv out.tsv] [--symbol name] [--all]");
   process.exit(2);
 }
 let worklist = null;
 let tsv = null;
 let symbolQuery = null;
+let allImports = false;
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--worklist") worklist = args[++i];
   if (args[i] === "--tsv") tsv = args[++i];
   if (args[i] === "--symbol") symbolQuery = args[++i];
+  if (args[i] === "--all") allImports = true;
 }
 
 const MODULES = ["main", "sdk", "subsdk0", "subsdk1", "subsdk2", "subsdk3"];
@@ -127,6 +129,30 @@ function matches(target, demangled) {
 
 const rows = [];
 const unresolved = [];
+
+if (allImports) {
+  const byProvider = new Map();
+  const missing = [];
+  for (let i = 0; i < imports.length; i++) {
+    const name = imports[i].name;
+    const list = providers.get(name);
+    if (list && list.length) {
+      for (const p of list) byProvider.set(p.module, (byProvider.get(p.module) ?? 0) + 1);
+    } else {
+      missing.push({ name, demangled: importDemangled[i] });
+    }
+  }
+  const resolved = imports.length - missing.length;
+  console.log(`\nmain imports: ${imports.length}  resolved in the dump: ${resolved}  unresolved: ${missing.length}`);
+  for (const [module, count] of [...byProvider.entries()].sort((a, b) => b[1] - a[1])) {
+    console.log(`  ${module.padEnd(9)} ${count}`);
+  }
+  for (const m of missing.slice(0, 40)) {
+    console.log(`  MISSING ${m.demangled.slice(0, 110)}`);
+  }
+  if (missing.length > 40) console.log(`  ... and ${missing.length - 40} more`);
+  process.exit(0);
+}
 
 if (worklist) {
   for (const { target, got } of parseWorklist(worklist)) {

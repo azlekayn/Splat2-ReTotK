@@ -233,6 +233,20 @@ title and the game enters **PlayerMake** — `work/logs/boot-null-73.log` loads
 present #8558 at 60 fps, no crash. Note `TOTK_AUTO_NEWGAME`'s `DOWN@350,A@420,UP@480,A@540` is tuned
 for TotK's menu and does **not** dismiss Splatoon 2's title; the repeating A script does.
 
+**Visual state (Vulkan, frames captured with `LARECOMP_SHOT_AT`).** The 3D PlayerMake screen renders
+with a correct 3D Inkling and legible UI text — `work/…/build-vk/build/frames/frame_00240.png`
+("Now pick a skin tone!", skin swatches, B/Rotate hints) and `frame_00600.png` ("Are you cool with
+this?", fully lit character). Frames `frame_01140.png` show the "Nintendo Presents" logo with text.
+So the renderer is real, not a stub.
+
+Two visual defects to fix (user-reported, confirmed in the frames):
+- **Shadows go pure black** — everything inside a shadow is wiped out instead of merely darkened
+  (the shadow term looks like 0 with no ambient/indirect contribution). Suspect the shadow-map
+  sample/compare or the ambient term in the deferred GBuffer path (game lighting constants are
+  lifted, so check the renderer side first). Not yet investigated.
+- Some UI text was reported missing on one screen; the captured frames all show text, so it is
+  screen-specific (needs a frame from that screen).
+
 Next milestone: get through PlayerMake into the tutorial 3D room, then plaza (plan 4–5). Known-small
 gaps seen in the log:
 `nn::audio::GetAuxSampleRate` (UNIMPL, returns 0), `nn::fs::CommitSaveData` (UNIMPL). One memory

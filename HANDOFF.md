@@ -156,9 +156,22 @@ host has. Two follow-ups (runtime only):
 Result: the engine reaches `RootTask` init and its `SceneLoad` thread, starts the presentation
 loop, and runs **without crashing**. With the `JamMessageQueue` fix the scene framework comes up
 (`SceneLoadInCalc`, `SceneGeneralMain/Sub1/Sub2` threads) and the game issues its **first frame** —
-`work/logs/boot-null-67.log`: `[nvn] first present (texture 0)` plus 69 recorded `nvnDraw*/nvnClear`
-calls (headless/null backend records draws but has no visible output). Next: the Vulkan build for a
-rendered frame (`build-vk`, Intel Arc, 1280x720 swapchain).
+`work/logs/boot-null-67.log`: `[nvn] first present (texture 0)`, `present #1`, 69 `nvnCommand`
+records, then a stable 60 Hz loop (headless/null backend has no visible output).
+
+**Vulkan reached a rendered frame too.** `work/logs/vk-03.log` (build-vk, Intel Arc, 1280x720):
+`[nvn] first present (texture 0)`, then `[hitch] frame 1: 1006 ms … 1 draws, 2 submits`, present
+1..8, and `[fs] title-phase open saveMount:/save.dat at present 1/8` — i.e. the game is at the
+title/save phase and has presented real frames.
+
+**Next blocker:** the Vulkan run then faults (addr 0) on a sead worker thread in
+`Lp::Utl::PlayReportWrapper::addBool` (`main 0x12cd3f4`), reached from
+`Lp::Sys::WorkerThread::calc_` → `Cmn::PlayReport::saveBootEventMain_` →
+`Cmn::PlayReport::prepareAndGetPlayReport`. `addBool` calls `nn::prepo::PlayReport::addBool`
+(`imp_609`) and gets error `0x81`; its error path then dereferences a null/`0x81` pointer. So the
+telemetry/prepo path needs looking at (it is in the default `TOTK_LIFT` list as `_ZN2nn5prepo`).
+Headless survives (it sits at the same title/save phase without the worker crash), so this may be
+timing-dependent.
 
 ## Runtime work already done (all game-agnostic; TotK behaviour preserved)
 

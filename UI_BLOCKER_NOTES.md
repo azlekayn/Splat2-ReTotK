@@ -100,8 +100,12 @@ Result (`work/logs/boot-null-61.log/.err`, instrumented build `build-trace`):
   `UNIMPL` (a worker never got its stop message). Implementing `JamMessageQueue`/
   `TryJamMessageQueue` (`runtime/hle_os_thread.cpp`) let the scene framework start
   (`SceneLoadInCalc`, `SceneGeneralMain/Sub1/Sub2`) and the game issue its **first frame**:
-  `work/logs/boot-null-67.log` has `[nvn] first present (texture 0)` and 69 recorded
-  `nvnDraw*/nvnClear` calls (headless/null backend records but does not display them).
+  `work/logs/boot-null-67.log` has `[nvn] first present (texture 0)` and 69 `nvnCommand` records
+  (headless/null backend records but does not display them). The Vulkan build also reached a
+  rendered frame (`work/logs/vk-03.log`: `first present`, `[hitch] frame 1 … 1 draws`, present
+  1..8, title-phase `saveMount:/save.dat`), then faulted on a sead worker thread in
+  `Lp::Utl::PlayReportWrapper::addBool` (`main 0x12cd3f4`) after `nn::prepo::PlayReport::addBool`
+  returned error `0x81` — a telemetry/prepo issue, not the UI.
 
 (Scratch instrumentation used for this lives in `work/gen-totk/main-trace/` and is not committed;
 `work/logs/boot-trace-*.log` hold the probes. `work/sym.py`, `work/szs_list.py`,

@@ -1,0 +1,24 @@
+# Boot -> tutorial for the Splatoon 2 / TotK-runtime port, driven by tools/input_sequencer.py.
+#
+# Runtime side:  TOTK_PAD_FILE=/w/pad.state ... ./totk   (and TOTK_TRACE_FS=1 so 'waitfor' can see layout opens)
+# Host side:     python3 tools/input_sequencer.py tools/scenarios/boot-to-tutorial.txt \
+#                    --pad work/pad.state --log work/logs/vk-XX.log
+#
+# Timing is wall-clock; tune the waits if your machine boots slower.
+
+# Let the boot logos/title come up, then tap past the title's "press any button".
+wait 6000
+press A 120
+
+# PlayerMake: A accepts each step's default. The final "Are you cool with this?" screen defaults to
+# No, so Right then A selects Yes and continues into the shooting-range tutorial.
+loop 40
+  press RIGHT 80
+  wait 40
+  press A 80
+  wait 700
+end
+
+# The tutorial's layout being opened in the fs trace marks the shooting range.
+waitfor OpenFile content:/Layout/Tut_TutorialPicture_00 120000
+mark reached-tutorial

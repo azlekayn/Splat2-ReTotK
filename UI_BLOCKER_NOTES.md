@@ -95,7 +95,13 @@ Result (`work/logs/boot-null-61.log/.err`, instrumented build `build-trace`):
   namespaces from `TOTK_LIFT_ALL` (in `rt_main.cpp`'s `kService` list) plus adding the missing
   auto-clear `nn::os::WaitEvent` HLEs cleared them, and the engine now reaches `RootTask` init and
   its `SceneLoad` thread and runs **without crashing** (`work/logs/boot-null-65.log`: `[vsync] 7200
-  ticks, ~16.6 ms`, `[audio] frame 24000`; headless, no draws yet).
+  ticks, ~16.6 ms`, `[audio] frame 24000`).
+- the main thread then parked in `nn::os::WaitThread` because `nn::os::JamMessageQueue` was
+  `UNIMPL` (a worker never got its stop message). Implementing `JamMessageQueue`/
+  `TryJamMessageQueue` (`runtime/hle_os_thread.cpp`) let the scene framework start
+  (`SceneLoadInCalc`, `SceneGeneralMain/Sub1/Sub2`) and the game issue its **first frame**:
+  `work/logs/boot-null-67.log` has `[nvn] first present (texture 0)` and 69 recorded
+  `nvnDraw*/nvnClear` calls (headless/null backend records but does not display them).
 
 (Scratch instrumentation used for this lives in `work/gen-totk/main-trace/` and is not committed;
 `work/logs/boot-trace-*.log` hold the probes. `work/sym.py`, `work/szs_list.py`,

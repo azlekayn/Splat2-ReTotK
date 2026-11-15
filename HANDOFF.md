@@ -77,6 +77,33 @@ resolve in the dump, and the only non-marker misses are the 8 `glslc*` functions
 - Deck target: build against the SteamRT/sniper sysroot (the XC2 `build-diag.sh` pattern),
   or the baseline's native build for a smoke test and a sniper build for the release.
 
+
+## 2026-11-15 session: null boot past nnMain
+
+See [BOOT_SMOKE_NULL.md](BOOT_SMOKE_NULL.md) for the run recipe, the full stage list and the
+generator numbers. Summary:
+
+- The null build links and boots: `DT_INIT` -> `nninitStartup` -> 1604 init_array entries ->
+  `nnMain` -> the game's own memory report -> NVN device/window (3 buffers) -> presentation
+  thread -> audio renderer -> romfs sound banks + `ELink2`/`SLink2` -> the lifted `nn::fontll`
+  text engine.
+- 409 of `main`'s 463 zero-stubs were sdk bodies; 192 are now lifted (`TOTK_LIFT_ALL=1`, with
+  service/IPC namespaces excluded). A new `svc::aarch64::lp64` HLE layer handles what lifted sdk
+  code reaches; `svcOutputDebugString` is what prints the game's own log and assertion text.
+- Current blocker: `Cui::CustomizePartsSet::onInitialize` (`main 0x1d9530`) looks up
+  `/L_ItemBtn_%02d` in the page's control list (`Cui::Page::findPartsControl`, `0x20bd74`) and
+  dereferences a null result at `0x1d95f8`. The old port (SP2decomp) had a *different* failure in
+  the same function (a dropped tail call at `0x20bd74`); our generator emits that tail call
+  correctly (`[[clang::musttail]]`), so this one is the layout tree missing those controls at
+  `onInitialize` time. Next: check how the page's layout is meant to be loaded before
+  `onInitialize`, and whether a `Layout/*.szs` open is missing from the trace.
+- `TOTK_NVN_INT="0=53"` is a stopgap for the per-game NVN API major version; it belongs in the
+  game definition.
+- Cross-port findings were sent to SP2decomp as PR #7
+  (`RECOMP_GENERATOR_AND_SDK_CONTRACTS.md`): jump-table operand order, cold BL fragments, and the
+  SDK contracts (MemoryInfo, SDK 3.x audio params + device names, `nn::pl`, NVN API version,
+  the missing `nn::os` entries, the svc list and the lift/HLE boundary).
+
 ## Next steps
 
 1. **Null/headless boot.** Build the baseline runtime with `--null` against

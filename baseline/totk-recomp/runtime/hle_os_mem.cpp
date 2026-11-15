@@ -25,12 +25,19 @@ u64 g_rt_heap_base;
 extern "C" u64 kernel_heap_size(void) { return g_heap_used; }   // committed bytes from g_rt_heap_base
 static std::mutex g_heap_mtx;
 
-// nn::os::MemoryInfo: +0 totalAvailableMemorySize, +8 totalUsedMemorySize (read by nninitStartup:
-// heap = ((avail - used) & ~2MB) - 0x900000), further fields zero for now.
+// nn::os::MemoryInfo. The layout is the sdk's own DebugImplByHorizon::QueryMemoryInfo (sdk 0x85154 on Splatoon 2's build):
+//   +0x00 total physical (svcGetInfo 6),  +0x08 total used (svcGetInfo 7),
+//   +0x10 heap size, +0x18 heap used, +0x20 heap free, +0x28 heap reserved/peak, +0x30 u32.
+// TotK's nninitStartup reads {+0, +8}: heap = ((avail - used) & ~2MB) - 0x900000 (unchanged). Splatoon 2's nnMain reads
+// {+0x10, +0x18} right after SetMemoryHeapSize(0xcb000000) + AllocateMemoryBlock(0x2000000) and reserves the difference
+// as its main heap, so those two must be the live heap numbers, not zero (a zero size made VirtualAlloc(0) fail).
 HLE_AS(os_QueryMemoryInfo, "_ZN2nn2os15QueryMemoryInfoEPNS0_10MemoryInfoE") {
     u64* mi = (u64*)c->x[0];
     memset(mi, 0, 0x38);
     mi[0] = kAvailable; mi[1] = kProgram + g_heap_used;
+    mi[2] = g_heap_size; mi[3] = g_heap_used;
+    mi[4] = g_heap_size > g_heap_used ? g_heap_size - g_heap_used : 0;
+    mi[5] = g_heap_size;
     c->x[0] = 0;
 }
 // Write watch default. Windows: on. Linux: OFF (TOTK_WW=1 turns it on). There it is mprotect + SIGSEGV (runtime/linux/plat_posix.cpp), and
@@ -159,6 +166,9 @@ HLE_AS(os_SetMemoryHeapSize, "_ZN2nn2os17SetMemoryHeapSizeEm") {
 HLE_AS(os_AllocateMemoryBlock, "_ZN2nn2os19AllocateMemoryBlockEPmm") {
     std::lock_guard<std::mutex> l(g_heap_mtx);
     u64 size = (c->x[1] + 0x1FFFFF) & ~0x1FFFFFull;
+    // size 0 (a caller that computed a free size from an all-zero MemoryInfo): hand back the bump pointer, take nothing.
+    // VirtualAlloc(a, 0) fails, which used to trap here.
+    if (!size) { *(u64*)c->x[0] = g_heap_base + g_heap_used; c->x[0] = 0; return; }
     if (g_heap_used + size > g_heap_size) { printf("[os] AllocateMemoryBlock(%llx): out of heap\n", size); c->x[0] = 0x1A01; return; }
     u64 a = g_heap_base + g_heap_used;
     if (!VirtualAlloc((void*)a, size, MEM_COMMIT, PAGE_READWRITE)) rt_trap(c, c->x[30], "AllocateMemoryBlock: commit failed");

@@ -435,9 +435,15 @@ void rt_call_indirect(Ctx* c, u64 target);           // BLR / tail BR to unknown
 extern GuestFn* g_ftab;                              // indexed by (addr - FTAB_BASE) >> 2
 extern u64 g_ftab_n;
 #define FTAB_BASE 0x7100000000ull
+// TOTK_IND_LOG=1: remember the last guest indirect calls per thread (rt_ind_note) and print them from the crash handler.
+// The guest backtrace only follows x29 frames, so a virtual call into a tail-calling thunk otherwise shows no caller.
+extern bool g_ind_log;
+void rt_ind_note(Ctx* c, u64 t);
+void rt_ind_dump(void);
 RT_INLINE void call_ind(Ctx* c, u64 t) {
     u64 i = (t - FTAB_BASE) >> 2; GuestFn f;
-    if (i < g_ftab_n && (f = g_ftab[i]) != nullptr) f(c); else rt_call_indirect(c, t);
+    if (i < g_ftab_n && (f = g_ftab[i]) != nullptr) { if (g_ind_log) rt_ind_note(c, t); f(c); }
+    else rt_call_indirect(c, t);
 }
 [[noreturn]] void rt_trap(Ctx* c, u64 pc, const char* why);
 void rt_mrs_unknown(Ctx* c, u64 pc);

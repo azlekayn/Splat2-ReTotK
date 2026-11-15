@@ -7,7 +7,7 @@ Guest memory is identity-mapped; the image is loaded at IMGBASE.
 Writes: tu_NNN.cpp, ftab.cpp (address -> function table), imports.cpp (import thunks),
 report.json (coverage: unhandled instructions by mnemonic/shape).
 """
-import collections, io, json, os, re, struct, sys
+import collections, io, json, os, re, struct, sys, bisect
 from capstone import Cs, CS_ARCH_ARM64, CS_MODE_ARM
 
 IMGBASE = 0x7100000000
@@ -378,6 +378,15 @@ class Emitter:
 
     # -------------------------------------------------- jump tables
     def jump_table(self, insns, i, start, end):
+        # Two operand orders reach the same `br`: `add d, anchor, idx` (handled directly) and `add d, d, base`, where the
+        # "anchor" is the table's own base and d holds the loaded entry (`ldrsw x12,[x28,x12,lsl #2]; add x12,x12,x28;
+        # br x12` — sdk 0x3ccd8, nn::util::VFormatString's flag parser). Try both before giving up.
+        for swapped in (False, True):
+            got = self._jump_table(insns, i, start, end, swapped)
+            if got: return got
+        return None
+
+    def _jump_table(self, insns, i, start, end, swapped=False):
         reg = insns[i][3].strip()
         # look back for: add <reg>, xA, wI, sxt?/uxt? #2 ; adr xA, #anchor ; ldr* wI, [xT, xK...] ; adrp/add xT
         rn = lambda r: r[1:] if GPR.match(r) else r      # register number, width-agnostic
@@ -396,6 +405,7 @@ class Emitter:
                 break                    # the br register comes from something else
         if not addm: return None
         anchor_reg, idx_reg = addm[1], addm[2]
+        if swapped: anchor_reg, idx_reg = idx_reg, anchor_reg   # `add d, d, base`: base is the anchor, d the entry
         k, amt = parse_mod(addm[3]) if len(addm) == 4 else ('', 0)
         anchor = None; load = None; li = i
         for wi in range(len(window) - 1, -1, -1):
@@ -408,7 +418,7 @@ class Emitter:
             if (m in ('ldrb', 'ldrh', 'ldrsw', 'ldrsb', 'ldrsh', 'ldr') and rn(ops[0]) == rn(idx_reg) and load is None
                     and wi < ai and len(ops) > 1 and (mo := MEM.match(ops[1])) and mo.group(2) and GPR.match(split_ops(mo.group(2))[0])):
                 load = (m, ops); li = max(0, i - W) + wi
-        if anchor is None or load is None: return None
+        if load is None: return None
         m, ops = load
         mm = MEM.match(ops[1])
         if not mm or not mm.group(2): return None
@@ -432,6 +442,11 @@ class Emitter:
             break
         # (no adrp as the nearest definition, e.g. f_7a5078's `add x21,x19,#0xd0` on another path: use the alternates below)
         tabs = [page + (off or 0)] if page is not None else []
+        # `add d, d, base`: the anchor is the table itself (adrp+add into the same register the load indexes from), not an
+        # `adr` label. The table address the load uses is then the anchor every entry is relative to.
+        if anchor is None and page is not None and rn(anchor_reg) == rn(tbase_reg):
+            anchor = page + (off or 0)
+        if anchor is None: return None
         # The base register can hold different tables on different paths into a shared dispatch (f_7a5078's x21: three
         # loops each load their own table at 0x7a5140/0x7a5320/0x7a53e0, then branch to common `ldrh w10,[x21,x8,lsl #1]`
         # + br sites; the nearest definition by address gave the wrong table and case 0x7a59b0 trapped). Read every
@@ -1363,6 +1378,21 @@ def main():
                     idx = add_imp(nm)
                     if typ == 1026: got_imports[off] = idx
     plt = plt_map(img, info, got_imports, text['mem'] + text['size'], len(got_imports))
+    # Cold fragments: a direct BL can target code the FDE scan does not list as a function (a function's cold part placed
+    # right after its hot part: main's 0x13a6ef4 FDE ends exactly at 0x13a6f2c, and 0x13a2748 calls it). Such an address
+    # must be lifted: a runtime call_ind has no ftab entry at a mid-image address, so it trapped (boot run 10,
+    # "indirect call to unknown target 71013a6f2c"). Synthesize a function there, bounded by the next FDE start.
+    if not os.environ.get('TOTK_NO_SYNTH'):
+        tlo, thi = text['mem'], text['mem'] + text['size']
+        extra = sorted({t for t in json.load(open(fj)).get('bl', [])
+                        if t not in fde and t not in plt and tlo <= t < thi and not (t & 3)})
+        starts = sorted(fde)
+        for t in extra:
+            i = bisect.bisect_right(starts, t)
+            end = starts[i] if i < len(starts) else thi
+            if end > t: fde[t] = end - t
+        if extra: print('synthesized %d cold function(s) at non-FDE BL targets: %s'
+                        % (len(extra), ', '.join(hex(t) for t in extra)))
     em = Emitter(img, info, fde, plt, imports)
     em.trace = trace
     em.hooks = hooks

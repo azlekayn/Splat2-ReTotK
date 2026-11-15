@@ -416,3 +416,35 @@ HLE_AS(fs_ReadDirectory, "_ZN2nn2fs13ReadDirectoryEPlPNS0_14DirectoryEntryENS0_1
     *(s64*)c->x[0] = n; c->x[0] = 0;
 }
 HLE_AS(fs_CloseDirectory, "_ZN2nn2fs14CloseDirectoryENS0_15DirectoryHandleE") { }
+
+// ---------------------------------------------------------------- shared fonts (nn::pl)
+// nn::pl is the console's shared-font service. Splatoon 2 calls four entries; their real bodies are IPC clients, so a
+// lifted one dereferenced a null client pointer during nnMain. The game then waits for GetSharedFontLoadState to read 1
+// (main 0x1275240 spins until it does) and reads size + address. The address must never be null: the engine parses what
+// it is given, so an absent font becomes a zeroed block it rejects (and it falls back to its own romfs fonts).
+// TOTK_FONT=<file> substitutes a real font when the user has one (the runtime's OSD loader reads the same variable).
+static std::vector<u8> g_shared_font;
+static constexpr u64 kSharedFontSize = 4096;
+HLE_AS(pl_RequestSharedFontLoad, "_ZN2nn2pl21RequestSharedFontLoadENS0_14SharedFontTypeE") { c->x[0] = 0; }
+HLE_AS(pl_GetSharedFontLoadState, "_ZN2nn2pl22GetSharedFontLoadStateENS0_14SharedFontTypeE") { c->x[0] = 1u; }
+HLE_AS(pl_GetSharedFontSize, "_ZN2nn2pl17GetSharedFontSizeENS0_14SharedFontTypeE") {
+    c->x[0] = g_shared_font.empty() && getenv("TOTK_FONT") ? 0 : kSharedFontSize;
+}
+HLE_AS(pl_GetSharedFontAddress, "_ZN2nn2pl20GetSharedFontAddressENS0_14SharedFontTypeE") {
+    if (g_shared_font.empty()) {
+        const char* f = getenv("TOTK_FONT");
+        if (f) {
+            FILE* fp = fopen(f, "rb");
+            if (fp) {
+                fseek(fp, 0, SEEK_END); long n = ftell(fp); fseek(fp, 0, SEEK_SET);
+                if (n > 0) { g_shared_font.resize((size_t)n); if (fread(g_shared_font.data(), 1, (size_t)n, fp) != (size_t)n) g_shared_font.clear(); }
+                fclose(fp);
+            }
+        }
+        if (g_shared_font.empty()) {
+            printf("[pl] no shared font available: giving the engine an empty one (it falls back to its romfs fonts)\n");
+            g_shared_font.assign(kSharedFontSize, 0);
+        }
+    }
+    c->x[0] = (u64)g_shared_font.data();
+}

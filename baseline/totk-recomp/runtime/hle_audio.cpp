@@ -561,10 +561,27 @@ void output_thread() {
 // AudioRendererParameter: sampleRate +0, sampleCount +4, mixBufferCount +8, subMixCount +c, voiceCount +10, sinkCount +14,
 // effectCount +18, performanceFrameCount +1c, isVoiceDropEnabled +20, splitterCount +24, splitterSendChannelCount +28,
 // renderingDevice +2c, executionMode +30, _magic +34
-HLE_AS(audio_InitializeAudioRendererParameter, "_ZN2nn5audio32InitializeAudioRendererParameterEPNS0_22AudioRendererParameterE") {
+// InitializeAudioRendererParameter / IsValidAudioRendererParameter: Splatoon 2 uses the SDK 3.x layout, which differs
+// from the 5.x one the rest of this file's callers use. Recovered from the sdk bodies (0x1593b4 / 0x1592c4):
+//   +0x00 sampleRate (48000 or 32000), +0x04 sampleCount (= rate/200), +0x08 >=1, +0x0c in [0,0x100],
+//   +0x10 in [1,0x400], +0x14 >=1, +0x18 in [0,0x100], +0x30 revision info.
+// The real IsValid also compares +0x30 against the driver's live revision; that is a console-driver detail, so it is
+// left out here. The rest of the validation is reproduced exactly.
+HLE_AS(audio_InitializeAudioRendererParameter3, "_ZN2nn5audio32InitializeAudioRendererParameterEPNS0_22AudioRendererParameterE") {
+    memset((void*)c->x[0], 0, 0x34);
     u32* p = (u32*)c->x[0];
-    memset(p, 0, 0x34);
-    p[0] = 48000; p[1] = 240; p[2] = 1; p[4] = 24; p[5] = 1;
+    p[0] = 48000; p[1] = 240; p[2] = 1; p[4] = 1; p[5] = 1;
+    c->x[0] = 0;
+}
+HLE_AS(audio_IsValidAudioRendererParameter3, "_ZN2nn5audio29IsValidAudioRendererParameterERKNS0_22AudioRendererParameterE") {
+    const u32* p = (const u32*)c->x[0];
+    bool ok = (p[0] == 48000 || p[0] == 32000) && (p[1] == 240 || p[1] == 160)
+              && (s32)p[2] >= 1 && p[2] < 0x101
+              && (s32)p[3] >= 0 && p[3] < 0x101
+              && (s32)p[4] >= 1 && p[4] < 0x401
+              && (s32)p[5] >= 1 && p[5] < 0x101
+              && (s32)p[6] >= 0 && p[6] < 0x101;
+    c->x[0] = ok;
 }
 HLE_AS(audio_GetAudioRendererWorkBufferSize, "_ZN2nn5audio30GetAudioRendererWorkBufferSizeERKNS0_22AudioRendererParameterE") { c->x[0] = 0x10000; }
 HLE_AS(audio_GetAudioRendererConfigWorkBufferSize, "_ZN2nn5audio36GetAudioRendererConfigWorkBufferSizeERKNS0_22AudioRendererParameterE") { c->x[0] = 0x10000; }
@@ -784,6 +801,13 @@ HLE_AS(audio_RequestDetachMemoryPool, "_ZN2nn5audio23RequestDetachMemoryPoolEPNS
 HLE_AS(audio_IsMemoryPoolAttached, "_ZN2nn5audio20IsMemoryPoolAttachedEPKNS0_14MemoryPoolTypeE") {
     std::lock_guard<std::mutex> l(g_mtx); auto it = g_pool_attached.find(c->x[0]); c->x[0] = it != g_pool_attached.end() && it->second;
 }
+// MemoryPoolState: the service-side state of one pool. The real body is an IPC query (it never returns here), so this
+// has to be HLE'd: Splatoon 2 polls it after RequestAttachMemoryPool until it reads ATTACHED (1) and otherwise spins.
+HLE_AS(audio_GetMemoryPoolState, "_ZN2nn5audio18GetMemoryPoolStateEPKNS0_14MemoryPoolTypeE") {
+    std::lock_guard<std::mutex> l(g_mtx);
+    auto it = g_pool_attached.find(c->x[0]);
+    c->x[0] = (it != g_pool_attached.end() && it->second) ? 1u : 0u;
+}
 HLE_AS(audio_GetMemoryPoolAddress, "_ZN2nn5audio20GetMemoryPoolAddressEPKNS0_14MemoryPoolTypeE") { std::lock_guard<std::mutex> l(g_mtx); auto it = g_pools.find(c->x[0]); c->x[0] = it == g_pools.end() ? 0 : it->second.first; }
 HLE_AS(audio_GetMemoryPoolSize, "_ZN2nn5audio17GetMemoryPoolSizeEPKNS0_14MemoryPoolTypeE") { std::lock_guard<std::mutex> l(g_mtx); auto it = g_pools.find(c->x[0]); c->x[0] = it == g_pools.end() ? 0 : it->second.second; }
 HLE_AS(audio_GetSampleByteSize, "_ZN2nn5audio17GetSampleByteSizeENS0_12SampleFormatE") {
@@ -794,10 +818,26 @@ HLE_AS(audio_ListAudioOutputDeviceName, "_ZN2nn5audio25ListAudioOutputDeviceName
     if ((int)c->x[1] < 1) { c->x[0] = 0; return; }
     memset((void*)c->x[0], 0, 256); strcpy((char*)c->x[0], "MainAudioOut"); c->x[0] = 1;
 }
+// SDK 3.x spellings (before the ...ForOutput renames). Splatoon 2 calls these, and their real bodies are IPC clients
+// that would need a console's audio service, so they map onto the same one-device model as the 5.x names above.
+HLE_AS(audio_ListAudioDeviceName3, "_ZN2nn5audio19ListAudioDeviceNameEPNS0_15AudioDeviceNameEi") {
+    if ((int)c->x[1] < 1) { c->x[0] = 0; return; }
+    memset((void*)c->x[0], 0, 256); strcpy((char*)c->x[0], "MainAudioOut"); c->x[0] = 1;
+}
+HLE_AS(audio_GetActiveAudioDeviceName3, "_ZN2nn5audio24GetActiveAudioDeviceNameEPNS0_15AudioDeviceNameE") {
+    memset((void*)c->x[0], 0, 256); strcpy((char*)c->x[0], "MainAudioOut"); c->x[0] = 0;
+}
+HLE_AS(audio_GetAudioDeviceOutputVolume3, "_ZN2nn5audio26GetAudioDeviceOutputVolumeEPKNS0_15AudioDeviceNameE") {
+    retf(c, 1.0f);   // returns float: full volume
+}
+HLE_AS(audio_SetAudioDeviceOutputVolume3, "_ZN2nn5audio26SetAudioDeviceOutputVolumeEPKNS0_15AudioDeviceNameEf") { c->x[0] = 0; }
+HLE_AS(audio_GetActiveChannelCount3, "_ZN2nn5audio21GetActiveChannelCountEv") { c->x[0] = 2; }
+HLE_AS(audio_AcquireAudioDeviceSwitchNotification3, "_ZN2nn5audio36AcquireAudioDeviceSwitchNotificationEPNS_2os11SystemEventE") {
+    hle_sysevent_init(c->x[0], true); c->x[0] = 0;
+}
 HLE_AS(audio_GetActiveAudioOutputDeviceName, "_ZN2nn5audio30GetActiveAudioOutputDeviceNameEPNS0_15AudioDeviceNameE") { memset((void*)c->x[0], 0, 256); strcpy((char*)c->x[0], "MainAudioOut"); c->x[0] = 0; }
 HLE_AS(audio_GetActiveAudioDeviceChannelCountForOutput, "_ZN2nn5audio41GetActiveAudioDeviceChannelCountForOutputEv") { c->x[0] = 2; }
 HLE_AS(audio_AcquireAudioDeviceNotificationForOutput, "_ZN2nn5audio39AcquireAudioDeviceNotificationForOutputEPNS_2os11SystemEventE") { hle_sysevent_init(c->x[0], true); c->x[0] = 0; }
-HLE_AS(audio_SetAudioDeviceOutputVolume, "_ZN2nn5audio26SetAudioDeviceOutputVolumeEPKNS0_15AudioDeviceNameEf") { c->x[0] = 0; }
 
 // ------------------------------------------------------------------ effects
 static Effect& eff(u64 a) { return g_effects[a]; }

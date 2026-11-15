@@ -207,8 +207,11 @@ extern "C" void vi_present_pace(int interval) {
 // clamped to [1/240, 1/20] s (a load stall must not inject a huge step, physics dislikes > 1/20 s) and smoothed with an
 // EMA of 0.08 (instant jumps crashed Astro). TOTK_SPEED_FIX=0: old behaviour (fixed step); [speedfix] logs k every
 // 300 calls.
-void f_7a83e4_orig(Ctx* __restrict c);
+// Weak: only a main generated with --hook 7a83e4 (TotK) defines it. Another game's main has no such address, and this
+// translation unit still links (the hook is then unreachable dead code).
+void f_7a83e4_orig(Ctx* __restrict c) __attribute__((weak));
 void hook_f_7a83e4(Ctx* __restrict c) {
+    if (!f_7a83e4_orig) return;
     static const bool on = !getenv("TOTK_SPEED_FIX") || strcmp(getenv("TOTK_SPEED_FIX"), "0");
     u64 self = c->x[0];
     u32 interval = (u32)c->x[1];

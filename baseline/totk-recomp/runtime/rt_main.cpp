@@ -170,6 +170,27 @@ template <int N> static void imp_thunk(Ctx* c) { imp_dispatch(N, c); }
 template <int... I> static constexpr std::array<GuestFn, sizeof...(I)> mk_thunks(std::integer_sequence<int, I...>) { return { imp_thunk<I>... }; }
 static constexpr auto k_thunks = mk_thunks(std::make_integer_sequence<int, kMaxImports>{});
 
+// TOTK_IND_LOG=1: the last 32 guest indirect calls of this thread (call_ind in rt.h). A guest tail call leaves no x29
+// frame, so a virtual call that lands in a thunk with the wrong x0 has no visible caller in the backtrace; this has.
+bool g_ind_log = getenv("TOTK_IND_LOG") != nullptr;
+struct IndEnt { u64 lr, t, x0, x1; };
+static thread_local IndEnt t_ind[32];
+static thread_local int t_ind_pos;
+void rt_ind_note(Ctx* c, u64 t) {
+    IndEnt& e = t_ind[t_ind_pos++ & 31];
+    e.lr = c->x[30]; e.t = t; e.x0 = c->x[0]; e.x1 = c->x[1];
+}
+void rt_ind_dump(void) {
+    if (!g_ind_log) return;
+    int n = t_ind_pos > 32 ? 32 : t_ind_pos;
+    fprintf(stderr, "[indlog] last %d indirect calls, oldest first (lr -> target, x0, x1)\n", n);
+    for (int i = 0; i < n; i++) {
+        const IndEnt& e = t_ind[(t_ind_pos - n + i) & 31];
+        fprintf(stderr, "[indlog]  %llx -> %llx init(0x%llx, 0x%llx)\n",
+                (unsigned long long)e.lr, (unsigned long long)e.t, (unsigned long long)e.x0, (unsigned long long)e.x1);
+    }
+}
+
 void rt_call_indirect(Ctx* c, u64 t) {
     if (t >= SDK_BASE && t < SDK_BASE + g_sdk.size) {
         u64 i = (t - SDK_BASE) >> 2;
@@ -335,6 +356,7 @@ static void on_crash_signal(int sig, siginfo_t* si, void* uc) {
             fp = nfp;
         }
     }
+    rt_ind_dump();
     fflush(stderr);
     _exit(3);
 }
@@ -707,8 +729,40 @@ int main(int argc, char** argv) {
         g_imp[i] = k_thunks[i];
         g_ftab[(IMP_FAKE - MAIN_BASE) / 4 + i] = k_thunks[i];
     }
-    printf("[ld] ftab %llu functions, %llu imports (%d HLE, %d lifted sdk, %llu stubbed)\n", g_ftab_count, g_imp_count, nhle,
-           nlift, g_imp_count - nhle - nlift);
+    // TOTK_LIFT_ALL=1: every remaining main import the sdk implements runs its real lifted body instead of the stub that
+    // returns 0. The HLE above still wins (those are the ones that need a host service behind them), so only the names
+    // nobody implemented change. Splatoon 2 leaves 465 of 784 stubbed; most of them are pure sdk code the dump already
+    // contains, and running it is both more faithful and less work than writing HLE for each.
+    //
+    // Services and IPC clients must stay out of it: their real bodies call into the kernel's IPC (svcConnectToNamedPort
+    // "sm:") which no Linux host has, and the runtime provides those APIs as HLE instead. Everything else is lifted.
+    // TOTK_LIFT_ALL_VERBOSE=1 lists what got bound (to grow this list deliberately rather than by guesswork).
+    int nlift_all = 0;
+    if (const char* la = getenv("TOTK_LIFT_ALL"); la && *la != '0') {
+        static const char* const kService[] = {
+            "_ZN2nn2sf", "_ZN2nn2sm", "_ZN2nn3svc", "_ZN2nn2vi", "_ZN2nn2fs", "_ZN2nn3hid", "_ZN2nn4nifm",
+            "_ZN2nn3apm", "_ZN2nn2oe", "_ZN2nn3aoc", "_ZN2nn4pctl", "_ZN2nn3ldn", "_ZN2nn4bcat", "_ZN2nn3nfp",
+            "_ZN2nn2ns", "_ZN2nn3spl", "_ZN2nn2pm", "_ZN2nn2lm", "_ZN2nn6applet", "_ZN2nn8settings",
+            "_ZN2nn3mii", "_ZN2nn3nfc", "_ZN2nn5movie", "_ZN2nn3cap", "_ZN2nn3web", "_ZN2nn3usb", "_ZN2nn3pcv",
+            "_ZN2nn5i2c", "_ZN2nn4gpio", "_ZN2nn3psc", "_ZN2nn5pminfo", "_ZN2nn4spsm", "_ZN2nn2ts",
+            "_ZN2nn4htcs", "_ZN2nn3ldr", "_ZN2nn6socket", "_ZN2nn3ssl", "_ZN2nn7account", "_ZN2nn2os",
+            "_ZN2nn2pl", "_ZN2nn5audio",
+        };
+        const char* verbose = getenv("TOTK_LIFT_ALL_VERBOSE");
+        for (u32 i = 0; i < g_imp_count; i++) {
+            if (g_hle[i]) continue;
+            const std::string nm = g_imp_names[i];
+            bool svc = false;
+            for (const char* p : kService) if (nm.compare(0, strlen(p), p) == 0) { svc = true; break; }
+            if (svc) continue;
+            if (GuestFn f2 = lifted(nm)) {
+                g_hle[i] = f2; nlift_all++;
+                if (verbose) printf("[ld] lift-all: %s\n", nm.c_str());
+            }
+        }
+    }
+    printf("[ld] ftab %llu functions, %llu imports (%d HLE, %d lifted sdk, %d lifted-unbound, %llu stubbed)\n", g_ftab_count, g_imp_count, nhle,
+           nlift, nlift_all, g_imp_count - nhle - nlift - nlift_all);
     // sdk PLT slots: our HLE (same names main uses), else main's own export (rtld resolves main first), else the sdk's
     // lifted definition
     if (g_s_imp_count > kMaxSdkImports) die("too many sdk imports %llu", g_s_imp_count);

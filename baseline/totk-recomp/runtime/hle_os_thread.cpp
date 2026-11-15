@@ -138,6 +138,15 @@ HLE_AS(os_CreateThread, "_ZN2nn2os12CreateThreadEPNS0_10ThreadTypeEPFvPvES3_S3_m
     printf("[os] CreateThread %llx fn=%llx stack=%llx+%llx prio=%d\n", t->type, t->fn, t->stack, t->stack_size, t->prio);
     c->x[0] = 0;
 }
+// 7-arg form (SDK 5+, the one that also takes the core number): same object, the core hint only matters to nn::os's
+// own scheduler, which is the host's here.
+HLE_AS(os_CreateThread7, "_ZN2nn2os12CreateThreadEPNS0_10ThreadTypeEPFvPvES3_S3_mii") {
+    HThread* t = g_threads.reset(c->x[0]);
+    t->type = c->x[0]; t->fn = c->x[1]; t->arg = c->x[2]; t->stack = c->x[3]; t->stack_size = c->x[4]; t->prio = (int)c->x[5];
+    printf("[os] CreateThread %llx fn=%llx stack=%llx+%llx prio=%d core=%d\n", t->type, t->fn, t->stack, t->stack_size,
+           t->prio, (int)c->x[6]);
+    c->x[0] = 0;
+}
 HLE_AS(os_StartThread, "_ZN2nn2os11StartThreadEPNS0_10ThreadTypeE") {
     HThread* t = g_threads.get(c->x[0]);
     t->h = CreateThread(nullptr, 256ull << 20, thread_entry, t, STACK_SIZE_PARAM_IS_A_RESERVATION, &t->tid);
@@ -159,6 +168,10 @@ HLE_AS(os_SetThreadName, "_ZN2nn2os13SetThreadNameEPNS0_10ThreadTypeEPKc") {
         wn[i] = 0;
         SetThreadDescription(t->h, wn);
     }
+}
+// SDK 5+ spelling of the same call (Splatoon 2's audio client uses it); the name pointer is stored, not copied.
+HLE_AS(os_SetThreadNamePointer, "_ZN2nn2os20SetThreadNamePointerEPNS0_10ThreadTypeEPKc") {
+    HThread* t = g_threads.get(c->x[0]); t->name = c->x[1] ? (const char*)c->x[1] : "";
 }
 HLE_AS(os_GetCurrentThread, "_ZN2nn2os16GetCurrentThreadEv") { c->x[0] = t_self ? t_self->type : 0; }
 HLE_AS(os_GetThreadId, "_ZN2nn2os11GetThreadIdEPKNS0_10ThreadTypeE") {
@@ -271,6 +284,13 @@ HLE_AS(os_SwitchToFiber, "_ZN2nn2os13SwitchToFiberEPNS0_9FiberTypeE") { rt_trap(
 
 // ---------------------------------------------------------------- TLS slots
 HLE_AS(os_AllocateTlsSlot, "_ZN2nn2os15AllocateTlsSlotEPNS0_7TlsSlotEPFvmE") {
+    int i = g_tls_next++;
+    if (i >= kTlsSlots) rt_trap(c, c->x[30], "out of TLS slots");
+    g_tls_dtor[i] = c->x[1]; *(u32*)c->x[0] = (u32)i; c->x[0] = 0;
+}
+// Same slot pool; the SDK's own variant (Splatoon 2 calls it from nn::os::detail) differs only in who owns the slot
+// table. The retail bodies are thin wrappers over one manager, so one pool is right for both.
+HLE_AS(os_SdkAllocateTlsSlot, "_ZN2nn2os18SdkAllocateTlsSlotEPNS0_7TlsSlotEPFvmE") {
     int i = g_tls_next++;
     if (i >= kTlsSlots) rt_trap(c, c->x[30], "out of TLS slots");
     g_tls_dtor[i] = c->x[1]; *(u32*)c->x[0] = (u32)i; c->x[0] = 0;
@@ -552,6 +572,7 @@ static bool q_recv(HQueue* q, u64* out, bool block, bool peek, s64 timeout_ns = 
 HLE_AS(os_InitializeMessageQueue, "_ZN2nn2os22InitializeMessageQueueEPNS0_16MessageQueueTypeEPmm") { q_init(c->x[0], c->x[2]); }
 HLE_AS(os_FinalizeMessageQueue, "_ZN2nn2os20FinalizeMessageQueueEPNS0_16MessageQueueTypeE") { }
 HLE_AS(os_SendMessageQueue, "_ZN2nn2os16SendMessageQueueEPNS0_16MessageQueueTypeEm") { q_send(g_queue.get(c->x[0]), c->x[1], true, false); }
+HLE_AS(os_TrySendMessageQueue, "_ZN2nn2os19TrySendMessageQueueEPNS0_16MessageQueueTypeEm") { c->x[0] = q_send(g_queue.get(c->x[0]), c->x[1], false, false); }
 HLE_AS(os_ReceiveMessageQueue, "_ZN2nn2os19ReceiveMessageQueueEPmPNS0_16MessageQueueTypeE") { q_recv(g_queue.get(c->x[1]), (u64*)c->x[0], true, false); }
 HLE_AS(os_InitializeLightMessageQueue, "_ZN2nn2os27InitializeLightMessageQueueEPNS0_21LightMessageQueueTypeEPmm") { q_init(c->x[0], c->x[2]); }
 HLE_AS(os_FinalizeLightMessageQueue, "_ZN2nn2os25FinalizeLightMessageQueueEPNS0_21LightMessageQueueTypeE") { }

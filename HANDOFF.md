@@ -253,8 +253,24 @@ Two visual defects to fix (user-reported, confirmed in the frames):
   Note only 2 `nvnTextureWriteTexels` calls appear in the run, so the glyph atlas is written through
   guest-heap memory (copied per draw) rather than WriteTexels.
 
-Next milestone: get through PlayerMake into the tutorial 3D room, then plaza (plan 4–5). Known-small
-gaps seen in the log:
+**Tutorial 3D room reached (plan milestone 4).** Driving the confirm with **Right then A** (it defaults
+to No) carries PlayerMake into the tutorial: `work/logs/vk-09.log` loads
+`Cst_ToShootingRange_00`, `Tut_TutorialPicture_00`, `Tut_Gyro_00`, `Tut_GuideMsg_00`,
+`Tut_ExpController_00`, `Tut_Cursor_00`, `Tut_CircleTimer_00`, presents #6744 with no crash, and
+`build-vk/build/frames/frame_04200.png` shows the 3D alley with the Inkling, balloons, the Pro
+Controller diagram and legible guide text. A working input script for the whole boot:
+`TOTK_PRESS="RIGHT@120+50x200,A@145+50x200"` (Right then A every ~0.8 s: dismisses the title, walks
+PlayerMake's defaults, and picks Yes on the confirm).
+
+**Known issue: the game runs at about half speed** (user-reported) — Splatoon 2 should be a locked 60,
+but gameplay appears ~30. The presenter itself reports `present #N: 60.0 fps` and `[vsync]` is steady
+16.6 ms, and `nn::os::GetSystemTickFrequency` returns the correct 19.2 MHz (`runtime/hle_os_thread.cpp`
+`kTickHz`), so this is likely the game's update/pacing path — e.g. `nn::vi` vsync-event consumption vs
+`nn::os::SleepThread`/`TimedWait…` giving each logic step twice the intended wall time, or the game
+measuring a 2× frame delta. `[sleep] timed waits … req 17.5 ms act 2.2 ms` is a useful signal. Next:
+compare the game's per-frame delta (ticks) against the real present interval.
+
+Known-small gaps seen in the log:
 `nn::audio::GetAuxSampleRate` (UNIMPL, returns 0), `nn::fs::CommitSaveData` (UNIMPL). One memory
 note: the run logs `texture … finalized while 1 pool slots name it: object kept (10630 kept,
 71391.9 MB of storage)` — finalized-but-referenced textures are retained; RSS reached ~8.9 GB in

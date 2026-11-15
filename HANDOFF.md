@@ -262,13 +262,17 @@ Controller diagram and legible guide text. A working input script for the whole 
 `TOTK_PRESS="RIGHT@120+50x200,A@145+50x200"` (Right then A every ~0.8 s: dismisses the title, walks
 PlayerMake's defaults, and picks Yes on the confirm).
 
-**Known issue: the game runs at about half speed** (user-reported) — Splatoon 2 should be a locked 60,
-but gameplay appears ~30. The presenter itself reports `present #N: 60.0 fps` and `[vsync]` is steady
-16.6 ms, and `nn::os::GetSystemTickFrequency` returns the correct 19.2 MHz (`runtime/hle_os_thread.cpp`
-`kTickHz`), so this is likely the game's update/pacing path — e.g. `nn::vi` vsync-event consumption vs
-`nn::os::SleepThread`/`TimedWait…` giving each logic step twice the intended wall time, or the game
-measuring a 2× frame delta. `[sleep] timed waits … req 17.5 ms act 2.2 ms` is a useful signal. Next:
-compare the game's per-frame delta (ticks) against the real present interval.
+**Known issue: the port renders at ~34 fps, not the locked 60** (user: the game's logic is fine; it is
+just not keeping up). The game logic is not the problem — `nn::os::GetSystemTickFrequency` is the
+correct 19.2 MHz (`kTickHz`) and the game's own timing is right. `work/logs/vk-09.log` is
+renderer-bound: the runtime's per-2 s report shows ~**20k draws and ~2.9k passes per second** and
+~**800–970 MB of uploads per 2 s** (mostly `v` = vertex), with the process at ~2.8 cores of 22 (so
+not CPU-saturated). `[vk] heap VRAM mirror (3248 MB): off, per-draw copies` means guest-heap
+vertex/texture data is copied per draw. So the targets are draw/pass overhead in the Vulkan backend
+and the per-draw guest-heap copies (the alias/vertex import path the TotK port uses via
+`VK_EXT_external_memory_host`), not game logic. A related symptom: `texture … finalized while 1 pool
+slots name it: object kept (10630 kept, 71391.9 MB)` — finalized-but-referenced textures are
+retained and re-uploaded.
 
 Known-small gaps seen in the log:
 `nn::audio::GetAuxSampleRate` (UNIMPL, returns 0), `nn::fs::CommitSaveData` (UNIMPL). One memory

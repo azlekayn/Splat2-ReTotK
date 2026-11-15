@@ -433,6 +433,8 @@ HLE_AS(os_InitializeSemaphore, "_ZN2nn2os19InitializeSemaphoreEPNS0_13SemaphoreT
 HLE_AS(os_FinalizeSemaphore, "_ZN2nn2os17FinalizeSemaphoreEPNS0_13SemaphoreTypeE") { }
 HLE_AS(os_AcquireSemaphore, "_ZN2nn2os16AcquireSemaphoreEPNS0_13SemaphoreTypeE") { sema_acquire(g_sema.get(c->x[0])); }
 HLE_AS(os_ReleaseSemaphore, "_ZN2nn2os16ReleaseSemaphoreEPNS0_13SemaphoreTypeEi") { sema_release(g_sema.get(c->x[0]), (int)c->x[1]); }
+// 1-arg overload (release one) — was UNIMPL, so a semaphore released this way never woke its waiter.
+HLE_AS(os_ReleaseSemaphore1, "_ZN2nn2os16ReleaseSemaphoreEPNS0_13SemaphoreTypeE") { sema_release(g_sema.get(c->x[0]), 1); }
 HLE_AS(os_InitializeLightSemaphore, "_ZN2nn2os24InitializeLightSemaphoreEPNS0_18LightSemaphoreTypeEii") { sema_init(c->x[0], (int)c->x[1], (int)c->x[2]); }
 HLE_AS(os_FinalizeLightSemaphore, "_ZN2nn2os22FinalizeLightSemaphoreEPNS0_18LightSemaphoreTypeE") { }
 HLE_AS(os_AcquireLightSemaphore, "_ZN2nn2os21AcquireLightSemaphoreEPNS0_18LightSemaphoreTypeE") { sema_acquire(g_sema.get(c->x[0])); }

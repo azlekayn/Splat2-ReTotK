@@ -226,7 +226,15 @@ milestone.
 scene at `present #3880: 60.0 fps`, 3949 frames in 70 s, 18029 draws / 6897 passes, no crash — the
 **title / 2D-UI-720p60 milestone on both backends.**
 
-Next milestone: the tutorial 3D room, then plaza (plan 4–5). Known-small gaps seen in the log:
+**Input injection works and the game advances.** The title waits for a button; `TOTK_PRESS`
+(`runtime/hle_hid.cpp`, frame-scripted buttons) with `A@120+30x300` (tap A every 0.5 s) dismisses the
+title and the game enters **PlayerMake** — `work/logs/boot-null-73.log` loads
+`Layout/Plm_PlayerMake_00` and `Layout/Plm_PlayerMakeBg_00` (plus the `Cmn_*` UI family), runs to
+present #8558 at 60 fps, no crash. Note `TOTK_AUTO_NEWGAME`'s `DOWN@350,A@420,UP@480,A@540` is tuned
+for TotK's menu and does **not** dismiss Splatoon 2's title; the repeating A script does.
+
+Next milestone: get through PlayerMake into the tutorial 3D room, then plaza (plan 4–5). Known-small
+gaps seen in the log:
 `nn::audio::GetAuxSampleRate` (UNIMPL, returns 0), `nn::fs::CommitSaveData` (UNIMPL). One memory
 note: the run logs `texture … finalized while 1 pool slots name it: object kept (10630 kept,
 71391.9 MB of storage)` — finalized-but-referenced textures are retained; RSS reached ~8.9 GB in

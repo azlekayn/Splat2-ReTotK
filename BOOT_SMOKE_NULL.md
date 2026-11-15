@@ -86,6 +86,9 @@ Splatoon 2 requires 53 where TotK requires 55. It belongs in the game definition
 
 1. Game definition: title/build ids, six modules, heap/alias/pool, 1280x720/60, NVN API 53, and
    `TOTK_LIFT_ALL` on by default for this title.
-2. Vulkan build for the first visible frame (needs static `libshaderc_combined.a`; the sniper
-   sysroot has glslang + SPIRV-Tools but no shaderc).
+2. Vulkan build for the first visible frame: **built and linked**. `libshaderc_combined.a`
+   (shaderc v2025.4, glslang + SPIRV-Tools merged; 19 MB) is built from source in the build
+   container and reaches the linker through `mkninja_linux.py --syslib <dir> --sysinc <dir>`
+   (`--sysinc` is a new option: the baseline assumed a distro shaderc whose headers are on the
+   default include path). A frame has not been captured yet.
 3. Clear the `main+0x1d9530` null dereference and keep walking the boot.

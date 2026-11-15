@@ -1,3 +1,6 @@
+> **Lưu ý:** Tệp này ghi lại bản port trước (sp2decomp, Windows/Vulkan) và đã lỗi thời — xem [README.md](README.md).
+> **Note:** this file documents the previous port and is out of date — see [README.md](README.md) for the current repository.
+
 # sp2decomp
 
 [English](README.md) · **Tiếng Việt**

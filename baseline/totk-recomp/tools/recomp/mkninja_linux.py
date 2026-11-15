@@ -14,6 +14,7 @@ usage: python3 mkninja_linux.py [--null] [--root DIR] [--gen DIR] [--out DIR] [-
   --ram-guard SCRIPT  run before every generated TU compile (e.g. wait until the Windows host has free RAM)
   --prebuilt-gen      do not build the generated objects here, only link them (they were built by another build dir sharing --obj)
   --syslib directory with libvpx.a and libshaderc_combined.a (default: the first of /usr/lib/x86_64-linux-gnu, /usr/lib64, /usr/lib that has libvpx.a)
+  --sysinc include directory for those archives (e.g. shaderc's headers when it is not a distro package)
   --pgo gen           instrumented build (-fprofile-generate=pgo, -DTOTK_PGO_GEN): rt_main writes pgo/*.profraw (relative to the
                       run directory) at TOTK_PGO_DUMP seconds
   --pgo use:FILE      build with that merged profile (llvm-profdata-19 merge -o FILE pgo/*.profraw); -mllvm -pgso=false as on Windows
@@ -41,6 +42,7 @@ if prebuilt: args.remove('--prebuilt-gen')
 pgo = opt('--pgo', '')                              # gen | use:<profdata> (Deck PGO, 2026-10-16: the Windows PGO exe was +12-18 %)
 gen_opt = opt('--gen-opt')                          # e.g. -O1: optimisation level of the generated TUs (default: the -O2 of cxxflags)
 gen_pool = int(opt('--gen-pool', '2'))              # generated TUs compiled at the same time (ninja pool depth)
+sysinc = opt('--sysinc')                            # headers for a syslib built outside the distro (e.g. shaderc)
 gen_keep = opt('--gen-keep')                        # file: objects (path relative to --obj) that keep the default -O2 rule
 guard = opt('--ram-guard')                          # script run before every generated TU (waits for free host RAM)
 here = os.path.dirname(os.path.abspath(__file__))
@@ -73,8 +75,10 @@ else:
 os.makedirs(out, exist_ok=True)
 sdk_dir = os.path.join(os.path.dirname(gen), 'sdk')
 inc = f'-I{RT}/linux -I{RT}'
+if sysinc: inc += f' -I{os.path.abspath(sysinc)}'   # before the distro, so a local shaderc wins
 cxxflags = f'-std=c++20 -O2 -march=x86-64-v3 -mtune=znver2 -fno-exceptions -fno-pic -Wno-everything -pthread -I{SDL}/include {inc}'
 cflags = f'-std=gnu17 -O2 -march=x86-64-v3 -mtune=znver2 -fno-pic -Wno-everything -pthread -I{SDL}/include -I{RT}/linux -I{RT}/nvn'
+if sysinc: cflags += f' -I{os.path.abspath(sysinc)}'
 # Vulkan headers newer than the distro's (VK_KHR_unified_image_layouts, feedback-loop info: 2026-10-19 runtime): a copy of the
 # Vulkan SDK's include/ at deps/vulkan-headers (1.4.357 on 2026-10-20); everything new is checked with has_ext at run time.
 VKH = os.path.join(deps, 'vulkan-headers', 'include')   # tools/linux/build_deps.sh fetches Vulkan-Headers 1.4.357 there

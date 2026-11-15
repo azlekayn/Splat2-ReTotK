@@ -101,26 +101,31 @@ def log_contains(path, needle):
     except OSError:
         return False
 
-def run_block(pad, steps, log):
-    for no, line in steps:
+def run_block(pad, steps, log, lo=0, hi=None):
+    """Execute steps[lo:hi]. 'loop <n>' ... 'end' repeats its block n times (nestable)."""
+    if hi is None:
+        hi = len(steps)
+    i = lo
+    while i < hi:
+        no, line = steps[i]
+        i += 1
         if not line:
             continue
         w = line.split()
         op = w[0].lower()
         if op == "loop":
-            # 'loop <n>' ... 'end' (non-nested): repeat the block n times
-            depth, end = 1, None
-            for j in range(steps.index((no, line)) + 1, len(steps)):
+            n = int(w[1]) if len(w) > 1 else 1
+            depth, j = 1, i
+            while j < hi:
                 o = steps[j][1].split()[0].lower() if steps[j][1] else ""
                 if o == "loop": depth += 1
                 elif o == "end":
                     depth -= 1
-                    if depth == 0: end = j; break
-            body = steps[steps.index((no, line)) + 1:end] if end else []
-            for _ in range(int(w[1])):
-                run_block(pad, body, log)
-            steps = steps[:steps.index((no, line)) + 1]
-            for s in body: steps.append(s)
+                    if depth == 0: break
+                j += 1
+            for _ in range(n):
+                run_block(pad, steps, log, i, j)
+            i = j + 1
             continue
         if op == "end":
             return
@@ -141,22 +146,32 @@ def run_block(pad, steps, log):
                 v = [int(x) for x in w[1:5]] + [0] * (4 - len(w[1:5]))
                 pad.set_sticks(*v[:4])
             elif op == "waitfor":
-                needle = w[1]
-                timeout = int(w[2]) if len(w) > 2 else 60000
+                # the needle may contain spaces (e.g. a log line): take the rest, minus an optional
+                # trailing numeric timeout token
+                rest = w[1:]
+                timeout = 60000
+                if len(rest) > 1 and rest[-1].isdigit():
+                    timeout = int(rest[-1]); rest = rest[:-1]
+                needle = " ".join(rest)
                 t0 = time.time()
                 while not log_contains(log, needle):
                     if (time.time() - t0) * 1000 > timeout:
-                        print(f"[seq] {path}:{no}: waitfor '{needle}' timed out after {timeout} ms", file=sys.stderr)
+                        print(f"[seq] line {no}: waitfor '{needle}' timed out after {timeout} ms", file=sys.stderr)
                         break
                     time.sleep(0.05)
             elif op == "mark":
                 print(f"[seq] mark: {' '.join(w[1:])}")
             elif op == "quit":
-                break
+                return
             else:
-                print(f"[seq] {path}:{no}: unknown step '{op}'", file=sys.stderr)
+                print(f"[seq] line {no}: unknown step '{op}'", file=sys.stderr)
         except (IndexError, ValueError) as e:
-            print(f"[seq] {path}:{no}: bad step '{line}': {e}", file=sys.stderr)
+            print(f"[seq] line {no}: bad step '{line}': {e}", file=sys.stderr)
+
+def run_scenario(pad, path, log):
+    with open(path) as f:
+        steps = [(i + 1, ln.split("#", 1)[0].strip()) for i, ln in enumerate(f)]
+    run_block(pad, steps, log)
 
 KEYMAP = {"a": "A", "b": "B", "x": "X", "y": "Y", "z": "ZL", "c": "ZR", "f": "R", "g": "L",
           "m": "MINUS", "v": "LS", "n": "RS"}

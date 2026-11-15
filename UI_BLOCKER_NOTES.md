@@ -113,6 +113,35 @@ exists, so the asset is expected by the engine's own resource tables.
 The diagnostic skip (5 generated lines wrapped in `if (c->x[8])`) was reverted after confirming
 this; it is not a fix, it only proved the failure is systematic rather than one bad control.
 
+## What `beginCreateSub` actually is (ruled out: it is not a resource load)
+
+`Lp::UI::PageHolder::beginCreateSub` (`main 0x127fe94`) is a *named sub-heap*, not a layout
+load:
+
+```
+sead::ExpHeap::create(size, SafeStringBase const& name, parent, align, dir, flag)
+Lp::UI::Impl::DualHeapAdapter::create(heap, ...)
+Lp::UI::Impl::LayoutResourceMgr::beginCreate(adapter)
+```
+
+so `"UI_%s"` is the *heap name* for the page's sub-heap (explaining why no `UI_*.szs` file
+exists), and the page's layouts are queued into `LayoutResourceMgr` by the page code and resolved
+through `Lp::UI::Impl::RootArchiveLayoutResourceAccessor::loadImpl` (`main 0x1304184`) while the
+sub is open. Every layout the game asked for was found (no `NOT FOUND` in the fs trace), so the
+short set is a *queue* difference, not a failed load.
+
+### Ruled out: language
+
+`nn::settings::eq(Language, LanguageCode)` was an unimplemented stub returning 0 for every query
+(and the argument is a *reference*, so reading x0 as the value is wrong — it gave garbage like
+34614004). Now implemented (dereference x0, compare the code's two-letter tag against the enum).
+It reports `Language 1, "en-US" -> 1` correctly, and the customize layout set is unchanged, so
+language is not the selector. (The fix is still right: the game's own language matching was
+broken, which is the same class of bug the other port fixed with its language-code byte order.)
+
+Next candidates: the operation mode (`nn::oe::GetOperationMode`) and the page-manager state that
+chooses handler sets.
+
 ## Reproducing the traces
 
 ```bash

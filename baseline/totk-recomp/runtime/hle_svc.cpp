@@ -152,3 +152,18 @@ HLE_AS(svc_fesetround, "__fesetround") { c->x[0] = (u64)fesetround((int)c->x[0])
 HLE_AS(svc_feclearexcept, "feclearexcept") { c->x[0] = (u64)feclearexcept((int)c->x[0]); }
 HLE_AS(svc_feraiseexcept, "feraiseexcept") { c->x[0] = (u64)feraiseexcept((int)c->x[0]); }
 HLE_AS(svc_fetestexcept, "fetestexcept") { c->x[0] = (u64)fetestexcept((int)c->x[0]); }
+
+// nn::settings::eq(Language const&, LanguageCode const&): does this language code name that language? The arguments are
+// references (the Language is a u32 behind x0, the code is the char[8] "en-US" behind x1). Left as a stub this returned 0
+// for every query, so the game never matched its own language.
+HLE_AS(settings_eq_language, "_ZN2nn8settingseqERKNS0_8LanguageERKNS0_12LanguageCodeE") {
+    const s32 lang = c->x[0] ? *(const s32*)c->x[0] : -1;
+    const char* code = (const char*)c->x[1];
+    // nn::settings::Language: ja, en-US, fr, de, es-419, es, it, nl, fr-CA, pt, ru, ko, zh-Hant, zh-Hans, pt-BR
+    static const char* const tag[] = {"ja", "en", "fr", "de", "es", "es", "it", "nl", "fr", "pt", "ru", "ko", "zh", "zh", "pt"};
+    bool ok = false;
+    if (code && lang >= 0 && lang < (s32)(sizeof tag / sizeof tag[0]))
+        ok = code[0] == tag[lang][0] && code[1] == tag[lang][1];
+    printf("[settings] eq(Language %d, \"%.5s\") = %d\n", lang, code ? code : "", (int)ok);
+    c->x[0] = ok;
+}

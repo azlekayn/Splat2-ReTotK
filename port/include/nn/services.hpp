@@ -87,7 +87,10 @@ public:
     // boot-closure caller is nn::init::InitializeAllocator, which constructs the game's global
     // allocator (`DAT_71036563a0`) and then initialises it with the block the boot root
     // obtained. The contract is the 3-argument constructor's buffer-backed mode applied to an
-    // object that already exists: (buffer, size), allocations bump forward from `buffer`.
+    // object that already exists: (buffer, size), with allocations served from a free-list
+    // over `buffer`. The retail object is also a free-list allocator (see
+    // PLATFORM_BODY_NOTES.md); the host version reuses and coalesces freed blocks rather than
+    // bumping a high-water mark.
     //
     // `buffer == nullptr` or `size == 0` leaves the allocator marked UNINITIALISED, so
     // Allocate returns null instead of silently falling back to the host heap. That is a

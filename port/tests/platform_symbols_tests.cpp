@@ -106,7 +106,15 @@ void TestStandardAllocatorInitialize() {
         Check(exhausted, "exhausting the block returns null instead of overflowing it");
 
         alloc.Free(p1);
-        Check(true, "Free stays a safe no-op on the buffer-backed allocator");
+        void *reused = alloc.Allocate(64, 16);
+        Check(reused != nullptr, "Free returns the block to the free list");
+        Check(reused == p1, "the next allocation reuses the freed block");
+
+        alloc.Free(p2);
+        alloc.Free(reused);
+        void *combined = alloc.Allocate(128, 16);
+        Check(combined != nullptr, "adjacent freed blocks coalesce for a larger request");
+        Check(combined == p1, "the coalesced block starts at the first freed block");
     }
 
     std::printf("\n  re-initialisation (the observed call happens once, but must not corrupt)\n");

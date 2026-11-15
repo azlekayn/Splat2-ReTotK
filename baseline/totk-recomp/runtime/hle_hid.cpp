@@ -927,7 +927,25 @@ static void keyboard_read(HostInput* in) {
         {SDL_SCANCODE_C, SDL_SCANCODE_UNKNOWN, BtnZR}, {SDL_SCANCODE_V, SDL_SCANCODE_UNKNOWN, BtnLS}, {SDL_SCANCODE_G, SDL_SCANCODE_UNKNOWN, BtnRS},
         {SDL_SCANCODE_ESCAPE, SDL_SCANCODE_UNKNOWN, BtnPlus}, {SDL_SCANCODE_M, SDL_SCANCODE_UNKNOWN, BtnMinus}, {SDL_SCANCODE_1, SDL_SCANCODE_UNKNOWN, BtnLeft},
         {SDL_SCANCODE_2, SDL_SCANCODE_UNKNOWN, BtnUp}, {SDL_SCANCODE_3, SDL_SCANCODE_UNKNOWN, BtnRight}, {SDL_SCANCODE_4, SDL_SCANCODE_UNKNOWN, BtnDown}};
-    for (auto& k : keys) if (down(k.a) || down(k.b)) in->buttons |= k.btn;
+    // PC-style mapping (TOTK_PC_INPUT, default on for this port): WASD move, mouse aim, Space jump (B),
+    // Shift ink-dive/squid (ZL), F bomb (R), LMB fire (ZR). The old TotK mapping stays under TOTK_PC_INPUT=0.
+    static const bool pc = !getenv("TOTK_PC_INPUT") || strcmp(getenv("TOTK_PC_INPUT"), "0") != 0;
+    if (pc) {
+        static const struct { SDL_Scancode a, b; u64 btn; } pckeys[] = {
+            {SDL_SCANCODE_SPACE, SDL_SCANCODE_UNKNOWN, BtnB},                                  // jump
+            {SDL_SCANCODE_LSHIFT, SDL_SCANCODE_RSHIFT, BtnZL},                                 // ink dive / squid
+            {SDL_SCANCODE_F, SDL_SCANCODE_UNKNOWN, BtnR},                                      // bomb
+            {SDL_SCANCODE_E, SDL_SCANCODE_UNKNOWN, BtnA}, {SDL_SCANCODE_RETURN, SDL_SCANCODE_UNKNOWN, BtnA},
+            {SDL_SCANCODE_Q, SDL_SCANCODE_UNKNOWN, BtnL}, {SDL_SCANCODE_V, SDL_SCANCODE_UNKNOWN, BtnLS},
+            {SDL_SCANCODE_G, SDL_SCANCODE_UNKNOWN, BtnRS},
+            {SDL_SCANCODE_ESCAPE, SDL_SCANCODE_UNKNOWN, BtnPlus}, {SDL_SCANCODE_M, SDL_SCANCODE_UNKNOWN, BtnMinus},
+            {SDL_SCANCODE_UP, SDL_SCANCODE_UNKNOWN, BtnUp}, {SDL_SCANCODE_DOWN, SDL_SCANCODE_UNKNOWN, BtnDown},
+            {SDL_SCANCODE_LEFT, SDL_SCANCODE_UNKNOWN, BtnLeft}, {SDL_SCANCODE_RIGHT, SDL_SCANCODE_UNKNOWN, BtnRight}};
+        for (auto& k : pckeys) if (down(k.a) || down(k.b)) in->buttons |= k.btn;
+        if (SDL_GetMouseFocus() && (SDL_GetMouseState(nullptr, nullptr) & SDL_BUTTON_LMASK)) in->buttons |= BtnZR;   // fire
+    } else {
+        for (auto& k : keys) if (down(k.a) || down(k.b)) in->buttons |= k.btn;
+    }
     static bool f9_was = false;
     bool f9 = down(SDL_SCANCODE_F9);
     if (f9 && !f9_was) {
@@ -945,13 +963,58 @@ static void keyboard_read(HostInput* in) {
         float k = 32767.0f * walk / sqrtf((float)(mx * mx + my * my));
         in->lx = (s32)lrintf(mx * k); in->ly = (s32)lrintf(my * k);
     }
-    if (cx || cy) {
+    if (pc) {
+        // "gyro to mouse": the mouse drives the camera like motion aim — a leaky integrator turns mouse speed
+        // into a right-stick deflection (so it keeps turning while the mouse moves and stops when it doesn't).
+        SDL_Window* w = SDL_GetKeyboardFocus();
+        static bool rel = false; static float ax = 0, ay = 0;
+        if (w && !rel) { SDL_SetWindowRelativeMouseMode(w, true); rel = true; printf("[hid] PC input: relative mouse aim\n"); }
+        float dx = 0, dy = 0; SDL_GetRelativeMouseState(&dx, &dy);
+        static const float sens = getenv("TOTK_MOUSE_SENS") ? (float)atof(getenv("TOTK_MOUSE_SENS")) : 2.0f;
+        ax = ax * 0.9f + dx * sens; ay = ay * 0.9f + dy * sens;
+        // Deadband + snap to 0: an idle mouse must not keep overriding a gamepad's right stick (the leaky
+        // integrator never reaches exactly 0, so without this a connected Xbox pad's camera would freeze).
+        if (fabsf(ax) < 150.0f && fabsf(ay) < 150.0f) { ax = ay = 0; }
+        else {
+            auto cl = [](float v) { return v < -32767.0f ? -32767.0f : v > 32767.0f ? 32767.0f : v; };
+            in->rx = (s32)cl(ax); in->ry = (s32)cl(ay);
+        }
+    } else if (cx || cy) {
         float k = 32767.0f / sqrtf((float)(cx * cx + cy * cy));
         in->rx = (s32)lrintf(cx * k); in->ry = (s32)lrintf(cy * k);
     }
 }
 #endif
 
+// ---------------------------------------------------------------- host-driven virtual controller
+// A host-side sequencer (tools/input_sequencer.py) writes a 24-byte state file ~60/s and the runtime merges it here,
+// so the game can be played/scripted with no physical pad. Packet: "PAD1", u32 seq, u64 buttons, s16 lx,ly,rx,ry.
+// If `seq` stops advancing for 500 ms the pad is released (a closed sequencer must not leave a button held).
+struct VPad { std::mutex m; u64 buttons = 0; s16 lx = 0, ly = 0, rx = 0, ry = 0; u32 seq = 0; u64 at = 0; };
+static VPad g_vpad;
+static void vpad_poll() {
+    const char* path = getenv("TOTK_PAD_FILE");
+    if (!path || !*path) return;
+    u8 buf[24];
+    FILE* f = fopen(path, "rb");
+    if (!f) return;
+    size_t n = fread(buf, 1, sizeof buf, f);
+    fclose(f);
+    if (n < sizeof buf || memcmp(buf, "PAD1", 4) != 0) return;
+    u32 seq; u64 b; s16 lx, ly, rx, ry;
+    memcpy(&seq, buf + 4, 4); memcpy(&b, buf + 8, 8);
+    memcpy(&lx, buf + 16, 2); memcpy(&ly, buf + 18, 2); memcpy(&rx, buf + 20, 2); memcpy(&ry, buf + 22, 2);
+    std::lock_guard<std::mutex> l(g_vpad.m);
+    if (seq != g_vpad.seq) { g_vpad.seq = seq; g_vpad.buttons = b; g_vpad.lx = lx; g_vpad.ly = ly; g_vpad.rx = rx; g_vpad.ry = ry; g_vpad.at = GetTickCount64(); }
+}
+static void vpad_merge(HostInput& in) {
+    if (!getenv("TOTK_PAD_FILE")) return;
+    std::lock_guard<std::mutex> l(g_vpad.m);
+    if (!g_vpad.seq || GetTickCount64() - g_vpad.at > 500) return;
+    in.buttons |= g_vpad.buttons;
+    if (g_vpad.lx || g_vpad.ly) { in.lx = g_vpad.lx; in.ly = g_vpad.ly; }
+    if (g_vpad.rx || g_vpad.ry) { in.rx = g_vpad.rx; in.ry = g_vpad.ry; }
+}
 // Several guest threads poll the npad every frame: read the host at most every 1 ms and share the result.
 // The refresh clock is steady_clock (QueryPerformanceCounter): GetTickCount64 advances in 15.6 ms steps, so a read
 // could get input up to ~15 ms old (input latency, user 2026-10-15). TOTK_INPUT_TICK=1: the old tick clock (A/B).
@@ -986,6 +1049,7 @@ static HostInput host_input() {
         hidpad_read(&in);
         g_f2_down = false;
         keyboard_read(&in);
+        vpad_poll(); vpad_merge(in);   // host sequencer (TOTK_PAD_FILE)
         // Graphics menu (hle_osd.cpp): L3 + R3 or F10; while it is open the game sees no input
         if (osd_menu_input(in.buttons | scripted_buttons(), g_f10_down)) in = {};
         {   // Shader warm-up screen (TOTK_WARMUP): A / B / + = play now, the warm-up keeps compiling in the background

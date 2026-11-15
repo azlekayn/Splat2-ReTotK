@@ -93,9 +93,26 @@ TOTK_LIFT_ALL=1 TOTK_NVN_INT="0=53" TOTK_ROMFS=/w/base-nsp/romfs TOTK_IMG=/w/img
 # with a window (needs --device /dev/dri; wayland/X sockets; tell the user first)
 podman run --rm -v "$PWD:/w:z" --device /dev/dri \
     --mount type=bind,source=/run/user/1000,destination=/run/user/1000 \
+    -v /dev/input:/dev/input -v /run/udev:/run/udev:ro \
     -e XDG_RUNTIME_DIR=/run/user/1000 -e WAYLAND_DISPLAY=wayland-1 -e DISPLAY=:0 \
     -e XAUTHORITY=/run/user/1000/xauth_* -w /w/totk-linux/build-vk <image> bash -lc '… ./totk'
 ```
+
+### Input (PC mapping + Xbox pad + scripted harness)
+
+- **PC mapping** (`TOTK_PC_INPUT`, default on; `=0` restores TotK's keys): WASD move (Ctrl walk), **mouse
+  aims** (relative-mouse leaky integrator → right stick, `TOTK_MOUSE_SENS`, default 2.0), **Space**
+  jump (B), **Shift** ink-dive/squid (ZL), **F** bomb (R), **LMB** fire (ZR), E/Enter confirm (A),
+  Esc `+`, M `−`, Q `L`, V/G stick clicks, arrows d-pad. `hle_hid.cpp keyboard_read`.
+- **Xbox controller**: the Linux `pad_read` already opens the first SDL3 gamepad and maps face buttons
+  by position, shoulders→L/R, triggers→ZL/ZR, sticks (dead zones), start/back→+/−, d-pad. The
+  container just needs the device nodes, hence `-v /dev/input:/dev/input -v /run/udev:/run/udev:ro`
+  above (the runtime logs `[hid] …` on open). The mouse's deadband keeps an idle mouse from
+  overriding the pad's right stick.
+- **Scripted harness**: `tools/input_sequencer.py` writes a `PAD1` state file that the runtime merges
+  when `TOTK_PAD_FILE` is set (`hle_hid.cpp vpad_*`); it has a line DSL (`wait`, `press`, `hold`,
+  `release`, `stick`, `waitfor <log text>`, `loop … end`), an `--interactive` keyboard mode, and
+  `tools/scenarios/boot-to-tutorial.txt` as a sample.
 
 Debug env: `TOTK_TRACE_FS=1` (every file open), `TOTK_TRACE_STR=1` + `--trace <offs>`
 (string-aware call trace), `TOTK_IND_LOG=1` (last 32 indirect calls on crash), `TOTK_TRACE_ALL=1`

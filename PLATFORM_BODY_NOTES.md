@@ -71,15 +71,57 @@ mutexes, buffer queues and IPC proxies. The port only flips a flag, which is app
 until the service layer exists; the recovered body is the reference for the real
 implementation.
 
+## Boot heap: the port's fixed values are stand-ins
+
+`sdk`:
+
+| Symbol | Offset | What the body does |
+|---|---:|---|
+| `AllocateMemoryBlock(unsigned long*, unsigned long)` | 0x81bd0 | delegates to the SDK heap manager at 0x2cb0cc |
+| `SetMemoryHeapSize(unsigned long)` | 0x81b84 | delegates to 0x2bf24c |
+| `QueryMemoryInfo(MemoryInfo*)` | 0x7ee20 | tail call to 0x2be38c (the `svcGetInfo` path) |
+
+The port's `QueryMemoryInfo` reports a fixed 4 GiB/0 and `AllocateMemoryBlock` uses the
+host allocator. Those are boot stand-ins, not reconstructions. They are fine while the
+port supplies its own memory, but the real bodies should be ported before heap sizing is
+expected to match the console.
+
+## Mutex layout: host behaviour matches, layout does not
+
+`nn::os::InitializeMutex` (`sdk` 0x80d40) writes a real layout:
+
+| Offset | Meaning |
+|---:|---|
+| +0x00 | initialised flag |
+| +0x01 | recursive flag (`& 1`) |
+| +0x04 | priority-inheritance flag |
+| +0x08 | recursion count (zeroed) |
+| +0x10 | owner thread (zeroed) |
+| +0x18 | embedded lock, initialised through 0x2cacac |
+
+`UnlockMutex` (0x80e80) decrements +0x08, returns while it is non-zero, then clears the
+owner at +0x10 and releases the lock at +0x18. The port's host mutex has the same
+observable recursion/ownership behaviour, but its `MutexType` storage is host-chosen; it
+does not reproduce this layout. Worth remembering if anything ever reads the fields.
+
+## Display and graphics entry points
+
+- `nn::vi::OpenDefaultDisplay` (`subsdk1` 0x90a0) is a small IPC wrapper: it passes the
+  descriptor at 0x2b324 to the vi helper at 0xd8b4. The port returns a static handle;
+  appropriate until the vi service layer exists.
+- `nv::InitializeGraphics` (`subsdk0` 0xc8c4) checks a global function-pointer pair and
+  branches to 0xb7214 (an assert-style path) when it is non-empty; it is not a simple heap
+  handover. The port records the `(heap, size)` pair as a placeholder. Re-check this when
+  an NVN backend exists.
+
 ## Next candidates
 
-- `nn::os::AllocateMemoryBlock` (sdk 0x81bd0) and `QueryMemoryInfo` (0x7ee20) — the boot
-  heap-sizing path.
-- `nn::os::InitializeMutex` / `LockMutex` / `UnlockMutex` (sdk 0x80d40 / 0x80d94 /
-  0x80e80) — the real recursion/thread-ownership semantics behind the port's host mutex.
-- `nn::vi::OpenDefaultDisplay` / `CreateLayer` / `GetDisplayVsyncEvent` — the display
-  boundary the port currently fakes with static handles.
-- `nv::InitializeGraphics` (subsdk0 0xc8c4) — the graphics-heap handover.
+- `nn::os::CreateThread` / `StartThread` / `WaitThread` — the real thread lifecycle behind
+  the host implementation in `port/`.
+- `nn::vi::CreateLayer` / `GetDisplayVsyncEvent` — the rest of the display boundary.
+- `nn::mem::StandardAllocator::Allocate`'s free-list internals (sdk 0x7becc) — the host
+  version now reuses and coalesces, but is not byte-identical to the retail TLSF-like bins.
+- `nvnBootstrapLoaderInternal` (subsdk0 0xb367c) — the real resolver behind the loader.
 
 None of this requires the port runtime; it is all module-relative disassembly of the
 reader's own dump.

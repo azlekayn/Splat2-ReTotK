@@ -306,6 +306,8 @@ static u64 now_ticks() {
     return (u64)((u128)t.QuadPart * kTickHz / (u64)f.QuadPart);
 }
 u64 rt_cntpct() { return now_ticks(); }      // CNTPCT_EL0 reads in lifted sdk code
+// The guest heap is ordinary host memory: nothing to flush to a device view.
+HLE_AS(os_FlushDataCache, "_ZN2nn2os14FlushDataCacheEPKvm") { c->x[0] = 0; }
 HLE_AS(os_GetSystemTick, "_ZN2nn2os13GetSystemTickEv") { c->x[0] = now_ticks(); }
 HLE_AS(os_GetSystemTickFrequency, "_ZN2nn2os22GetSystemTickFrequencyEv") { c->x[0] = kTickHz; }
 HLE_AS(os_ConvertToTick, "_ZN2nn2os13ConvertToTickENS_8TimeSpanE") { c->x[0] = (u64)((s128)(s64)c->x[0] * kTickHz / 1000000000); }
@@ -529,6 +531,9 @@ HLE_AS(os_WaitSystemEvent, "_ZN2nn2os15WaitSystemEventEPNS0_15SystemEventTypeE")
     ev_wait(g_event.get(c->x[0]), -1);
     evlog('w', c->x[0], c->x[30]);
 }
+HLE_AS(os_TimedWaitSystemEvent, "_ZN2nn2os20TimedWaitSystemEventEPNS0_15SystemEventTypeENS_8TimeSpanE") {
+    c->x[0] = ev_wait(g_event.get(c->x[0]), timespan_ns(c->x[1]) < 0 ? -1 : timespan_ns(c->x[1]));
+}
 HLE_AS(os_InitializeTimerEvent, "_ZN2nn2os20InitializeTimerEventEPNS0_14TimerEventTypeENS0_14EventClearModeE") { ev_init(c->x[0], false, (int)c->x[1]); }
 HLE_AS(os_FinalizeTimerEvent, "_ZN2nn2os18FinalizeTimerEventEPNS0_14TimerEventTypeE") { }
 HLE_AS(os_StartPeriodicTimerEvent, "_ZN2nn2os23StartPeriodicTimerEventEPNS0_14TimerEventTypeENS_8TimeSpanES3_") {
@@ -573,6 +578,7 @@ HLE_AS(os_InitializeMessageQueue, "_ZN2nn2os22InitializeMessageQueueEPNS0_16Mess
 HLE_AS(os_FinalizeMessageQueue, "_ZN2nn2os20FinalizeMessageQueueEPNS0_16MessageQueueTypeE") { }
 HLE_AS(os_SendMessageQueue, "_ZN2nn2os16SendMessageQueueEPNS0_16MessageQueueTypeEm") { q_send(g_queue.get(c->x[0]), c->x[1], true, false); }
 HLE_AS(os_TrySendMessageQueue, "_ZN2nn2os19TrySendMessageQueueEPNS0_16MessageQueueTypeEm") { c->x[0] = q_send(g_queue.get(c->x[0]), c->x[1], false, false); }
+HLE_AS(os_TryReceiveMessageQueue, "_ZN2nn2os22TryReceiveMessageQueueEPmPNS0_16MessageQueueTypeE") { c->x[0] = q_recv(g_queue.get(c->x[1]), (u64*)c->x[0], false, false); }
 HLE_AS(os_ReceiveMessageQueue, "_ZN2nn2os19ReceiveMessageQueueEPmPNS0_16MessageQueueTypeE") { q_recv(g_queue.get(c->x[1]), (u64*)c->x[0], true, false); }
 HLE_AS(os_InitializeLightMessageQueue, "_ZN2nn2os27InitializeLightMessageQueueEPNS0_21LightMessageQueueTypeEPmm") { q_init(c->x[0], c->x[2]); }
 HLE_AS(os_FinalizeLightMessageQueue, "_ZN2nn2os25FinalizeLightMessageQueueEPNS0_21LightMessageQueueTypeE") { }

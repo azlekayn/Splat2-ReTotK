@@ -594,6 +594,9 @@ HLE_AS(os_SendMessageQueue, "_ZN2nn2os16SendMessageQueueEPNS0_16MessageQueueType
 HLE_AS(os_TrySendMessageQueue, "_ZN2nn2os19TrySendMessageQueueEPNS0_16MessageQueueTypeEm") { c->x[0] = q_send(g_queue.get(c->x[0]), c->x[1], false, false); }
 HLE_AS(os_TryReceiveMessageQueue, "_ZN2nn2os22TryReceiveMessageQueueEPmPNS0_16MessageQueueTypeE") { c->x[0] = q_recv(g_queue.get(c->x[1]), (u64*)c->x[0], false, false); }
 HLE_AS(os_ReceiveMessageQueue, "_ZN2nn2os19ReceiveMessageQueueEPmPNS0_16MessageQueueTypeE") { q_recv(g_queue.get(c->x[1]), (u64*)c->x[0], true, false); }
+// JamMessageQueue: push at the front even when full (the stop/shutdown path WaitThread waits on).
+HLE_AS(os_JamMessageQueue, "_ZN2nn2os15JamMessageQueueEPNS0_16MessageQueueTypeEm") { q_send(g_queue.get(c->x[0]), c->x[1], true, true); }
+HLE_AS(os_TryJamMessageQueue, "_ZN2nn2os18TryJamMessageQueueEPNS0_16MessageQueueTypeEm") { c->x[0] = q_send(g_queue.get(c->x[0]), c->x[1], false, true); }
 HLE_AS(os_InitializeLightMessageQueue, "_ZN2nn2os27InitializeLightMessageQueueEPNS0_21LightMessageQueueTypeEPmm") { q_init(c->x[0], c->x[2]); }
 HLE_AS(os_FinalizeLightMessageQueue, "_ZN2nn2os25FinalizeLightMessageQueueEPNS0_21LightMessageQueueTypeE") { }
 HLE_AS(os_SendLightMessageQueue, "_ZN2nn2os21SendLightMessageQueueEPNS0_21LightMessageQueueTypeEm") { evlog('Q', c->x[0], c->x[30]); q_send(g_queue.get(c->x[0]), c->x[1], true, false); }

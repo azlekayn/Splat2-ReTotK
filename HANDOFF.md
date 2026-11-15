@@ -149,10 +149,16 @@ host has. Two follow-ups (runtime only):
   `_ZN2nn3err`, `_ZN2nn4diag` to the `TOTK_LIFT_ALL` service-exclusion list, so their bodies are not
   lifted (and abort on `sm:`).
 
+- one more kernel gap kept the main thread parked at `nn::os::WaitThread`: `nn::os::JamMessageQueue`
+  was `UNIMPL`, so a worker never got its stop message. `runtime/hle_os_thread.cpp` now implements
+  `JamMessageQueue`/`TryJamMessageQueue` (push-front, mirroring the Light variant).
+
 Result: the engine reaches `RootTask` init and its `SceneLoad` thread, starts the presentation
-loop, and runs **without crashing** — `work/logs/boot-null-65.log` shows `[vsync] 7200 ticks,
-interval ~16.6 ms` and `[audio] frame 24000` (headless/null backend, so no draws). Next: build the
-Vulkan build and check for a real first frame (`build-vk`, Intel Arc, 1280x720 swapchain).
+loop, and runs **without crashing**. With the `JamMessageQueue` fix the scene framework comes up
+(`SceneLoadInCalc`, `SceneGeneralMain/Sub1/Sub2` threads) and the game issues its **first frame** —
+`work/logs/boot-null-67.log`: `[nvn] first present (texture 0)` plus 69 recorded `nvnDraw*/nvnClear`
+calls (headless/null backend records draws but has no visible output). Next: the Vulkan build for a
+rendered frame (`build-vk`, Intel Arc, 1280x720 swapchain).
 
 ## Runtime work already done (all game-agnostic; TotK behaviour preserved)
 

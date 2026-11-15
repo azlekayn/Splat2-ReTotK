@@ -45,3 +45,17 @@ sp2port-build/
 *.o
 *.a
 port/build/
+
+# Splatoon 2 / TotK baseline build and data
+baseline/totk-recomp/build/
+baseline/totk-recomp/gen/
+baseline/totk-recomp/data/
+baseline/totk-recomp/deps/
+baseline/totk-recomp/dist/
+baseline/totk-recomp/obj/
+baseline/totk-recomp/private/
+work/
+*.nsp
+*.xci
+*.nca
+prod.keys

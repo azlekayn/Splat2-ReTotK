@@ -430,13 +430,20 @@ class Emitter:
         # Scan from the table load, not the br: the base register may be reused in between (f_2cb5b8: `ldrb w14,[x10,x12]`
         # then `mov w10,#1` before `br x13`).
         page = off = None
+        scan_reg = tbase_reg          # tbase_reg stays the load's base for the anchor test below
         for a, sz, mn, o in reversed(insns[:li]):
             p = split_ops(o)
-            if not p or rn(p[0]) != rn(tbase_reg): continue
-            if mn in ('add', 'sub') and len(p) == 3 and p[2].startswith('#') and rn(p[1]) == rn(tbase_reg):
+            if not p or rn(p[0]) != rn(scan_reg): continue
+            if mn in ('add', 'sub') and len(p) == 3 and p[2].startswith('#') and rn(p[1]) == rn(scan_reg):
                 off = (off or 0) + (imm(p[2]) if mn == 'add' else -imm(p[2])); continue   # adrp + add + add (f_4d9..)
             if mn == 'adrp':
                 page = imm(p[1]); break
+            # follow `mov scan, xOther` copies: the table base is often built in one register and moved into the one
+            # the load indexes from (`adrp x8; add x8,#off; mov x10,x8; ldrsw x8,[x10,x9,lsl#2]; add x8,x8,x10;
+            # br x8` — f_861a4, GBuffer::expand). Without this the nearest def of the load's base is the mov, the
+            # table stayed unresolved, and its mid-function case labels trapped in call_ind.
+            if mn == 'mov' and len(p) == 2 and GPR.match(p[1]):
+                scan_reg = p[1]; continue
             if mn in NOWRITE_D or mn.startswith('st'): continue
             if mn.startswith('ld') and '[sp' in o: continue     # epilogue restore on another path
             break

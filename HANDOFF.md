@@ -184,12 +184,31 @@ and records 90 `nvnCommand`s, then the runtime traps at `gsys::GBuffer::expand`
 (`_ZN4gsys7GBuffer6expandEPN3agl11DrawContextE`, `main 0xf861a4`, trap at `+0x150`) with
 `indirect call to unknown target (lr=0xf86264)`, reached from
 `ModelScene::drawOpa → ModelSceneBuffer::expandGBuffer → GBuffer::expand` on a sead worker
-(`FixedSizeJQ3::run`). `GBuffer::expand` reaches that point through a PIC jump-table dispatch
-(`0xf862e0`, table at `0x290f000+0xefc`); the object it dispatches on (`x0=0x7fb6815fec38` on the
-main thread's host stack) has vtable `0x7102f11168` whose slots are mostly the runtime's unknown
-stub `0x7105000bd0`. So a jump-table entry or a vtable slot resolves to a non-function. This is the
-3D render path (the title's Inkling / GBuffer), next session's target. `TOTK_IND_LOG=1` rings the
-last 32 indirect calls if the trap message is not enough.
+(`FixedSizeJQ3::run`). `GBuffer::expand` reaches that point through a **PIC jump table the generator did not resolve**
+(`br` at `0xf862e0`). The guest instruction sequence is:
+
+```asm
+0xf862cc  adrp x8, #0x290f000
+0xf862d0  add  x8, x8, #0xefc          ; x8 = table base
+0xf862d4  mov  x10, x8
+0xf862d8  ldrsw x8, [x10, x9, lsl #2]  ; x8 = entry (s32 byte offset)
+0xf862dc  add  x8, x8, x10             ; x8 = table + entry (a mid-function case label)
+0xf862e0  br   x8
+```
+
+The table at `0x290f000+0xefc` holds valid byte offsets (`[0]=0xf862e4, [1]=0xf862f4, [2]=0xf86310,
+[3]=0xf8632c`), but the generator emitted the runtime computation + `call_ind` instead of a
+`switch`, and `call_ind` only dispatches to function *entries* (`rt_main.cpp:194`), so the
+mid-function label traps. `gen.py`'s `_jump_table` looks for the load by the br register and for an
+`adr`/`adrp+add` table base, but its base scan stops at the `mov x10, x8` copy (the nearest
+definition of the base register is a `mov`, not the `adrp`).
+
+**Fixed in `tools/recomp/gen.py`** (generator change #4): `_jump_table`'s table-base scan now follows
+`mov <scan_reg>, xOther` copies while keeping the load's base for the `add d,d,base` anchor test.
+Regenerating `main` resolves 5 more tables (`br_jumptable` 1108 → 1113, `br_indirect` 6360 → 6355);
+`GBuffer::expand`'s dispatch at `0xf862e0` is now a C `switch` to `L_f862e4/…/L_f8632c`. Note the
+generator needs `capstone` (`pip3 install capstone` inside the build container). Rebuild started as
+`boot-null-70`. `TOTK_IND_LOG=1` rings the last 32 indirect calls if another such table appears.
 
 ## Runtime work already done (all game-agnostic; TotK behaviour preserved)
 

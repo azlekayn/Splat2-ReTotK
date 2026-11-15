@@ -89,6 +89,30 @@ customize page is one of those pages. A useful next probe is the same one they u
 decompressor with `dst == 0` and see whether `Cst_CustomizeDetail_00` is ever requested at all
 (our trace says no) or whether the group list is short.
 
+## The group's actual members (traced, in load order)
+
+```
+beginCreateSub("UI_Customize")
+  Cst_CustomizeBG_00
+  Cst_CustomizeTV_00
+  LStick_00
+  WeaponGearButton_00
+  WeaponIcon_00
+  ... (23 layout files in total this boot)
+```
+
+`Cst_CustomizeDetail_00` is not among them — and after a diagnostic skip of the null control it
+becomes clear that *both* missing control families belong to it:
+
+* `/L_ItemBtn_00` … `/L_ItemBtn_17` (24 slots, `CustomizePartsSet::onInitialize`)
+* `/L_CustomIconBtn_00` (`CustomizeMainPage::onInitialize` itself, `main 0x1d24d0`)
+
+So the page is missing one whole sub-layout, not one control. `Sound/ResourceList/UI_Body_Cst_CustomizeDetail_00.barslist`
+exists, so the asset is expected by the engine's own resource tables.
+
+The diagnostic skip (5 generated lines wrapped in `if (c->x[8])`) was reverted after confirming
+this; it is not a fix, it only proved the failure is systematic rather than one bad control.
+
 ## Reproducing the traces
 
 ```bash

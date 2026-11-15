@@ -173,6 +173,24 @@ telemetry/prepo path needs looking at (it is in the default `TOTK_LIFT` list as 
 Headless survives (it sits at the same title/save phase without the worker crash), so this may be
 timing-dependent.
 
+**That abort is fixed** by leaving `nn::prepo`'s `PlayReport::Add*` overloads un-lifted (add
+`!_ZN2nn5prepo10PlayReport3Add,!_ZN2nn5prepo16SystemPlayReport3Add` to the default `TOTK_LIFT` and
+`_ZN2nn5prepo` to the `kService` list in `rt_main.cpp`): the lifted generator's msgpack
+`WriteString` fails on the game's buffer, and dropping telemetry is the right port behaviour.
+`Lp::Utl::PlayReportWrapper` no longer aborts.
+
+**Next blocker (graphics).** The boot now runs the 3D title scene: `boot-null-69` presents 5 frames
+and records 90 `nvnCommand`s, then the runtime traps at `gsys::GBuffer::expand`
+(`_ZN4gsys7GBuffer6expandEPN3agl11DrawContextE`, `main 0xf861a4`, trap at `+0x150`) with
+`indirect call to unknown target (lr=0xf86264)`, reached from
+`ModelScene::drawOpa → ModelSceneBuffer::expandGBuffer → GBuffer::expand` on a sead worker
+(`FixedSizeJQ3::run`). `GBuffer::expand` reaches that point through a PIC jump-table dispatch
+(`0xf862e0`, table at `0x290f000+0xefc`); the object it dispatches on (`x0=0x7fb6815fec38` on the
+main thread's host stack) has vtable `0x7102f11168` whose slots are mostly the runtime's unknown
+stub `0x7105000bd0`. So a jump-table entry or a vtable slot resolves to a non-function. This is the
+3D render path (the title's Inkling / GBuffer), next session's target. `TOTK_IND_LOG=1` rings the
+last 32 indirect calls if the trap message is not enough.
+
 ## Runtime work already done (all game-agnostic; TotK behaviour preserved)
 
 `MemoryInfo` real layout (`+0x10` heap size, `+0x18` used, `+0x20` free); new

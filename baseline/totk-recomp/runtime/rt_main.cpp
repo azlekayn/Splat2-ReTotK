@@ -750,7 +750,11 @@ int main(int argc, char** argv) {
     {
         std::string s = getenv("TOTK_LIFT") ? getenv("TOTK_LIFT")
                       : "_ZN2nn6fontll,_ZNK2nn6fontll,_ZN2nn4util,_ZNK2nn4util,_ZN2nn5image,_ZNK2nn5image,"
-                        "_ZN2nn5prepo,_ZNK2nn5prepo,!_ZN2nn5prepo10PlayReport4Save,!_ZN2nn5prepo28RequestImmediateTransmission";
+                        "_ZN2nn5prepo,_ZNK2nn5prepo,!_ZN2nn5prepo10PlayReport4Save,!_ZN2nn5prepo28RequestImmediateTransmission,"
+                        // unlift the PlayReport Add overloads: the lifted generator's msgpack WriteString fails on
+                        // the game's buffer here, and Lp::Utl::PlayReportWrapper aborts on any Add error (telemetry
+                        // is dropped on purpose). They then fall through to kService below and stay stubbed.
+                        "!_ZN2nn5prepo10PlayReport3Add,!_ZN2nn5prepo16SystemPlayReport3Add";
         for (size_t p = 0, q; p < s.size(); p = q + 1) {
             q = s.find(',', p); if (q == std::string::npos) q = s.size();
             if (q > p) { std::string it = s.substr(p, q - p); if (it[0] == '!') lift_excl.push_back(it.substr(1)); else lift_prefix.push_back(it); }
@@ -791,6 +795,9 @@ int main(int argc, char** argv) {
             "_ZN2nn4htcs", "_ZN2nn3ldr", "_ZN2nn6socket", "_ZN2nn3ssl", "_ZN2nn7account", "_ZN2nn2os",
             "_ZN2nn2pl", "_ZN2nn5audio", "_ZN2nn7friends", "_ZN2nn3pia", "_ZN2nn3nex",
             "_ZN2nn4time", "_ZN2nn3err", "_ZN2nn4diag",
+            // prepo telemetry: its lifted Add fails (msgpack WriteString) and Lp::Utl::PlayReportWrapper
+            // aborts on any Add error; dropping reports is the right port behaviour, so leave it stubbed.
+            "_ZN2nn5prepo",
         };
         const char* verbose = getenv("TOTK_LIFT_ALL_VERBOSE");
         for (u32 i = 0; i < g_imp_count; i++) {

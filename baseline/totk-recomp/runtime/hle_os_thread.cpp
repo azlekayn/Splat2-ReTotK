@@ -105,6 +105,10 @@ void os_register_main_thread(Ctx* c, u64 stack_lo, u64 stack_size) {
     u64 tt = (u64)_aligned_malloc(0x200, 16); memset((void*)tt, 0, 0x200);   // guest-visible nn::os::ThreadType
     HThread* t = g_threads.get(tt);
     t->type = tt; t->stack = stack_lo; t->stack_size = stack_size; t->prio = 28; t->name = "MainThread";
+    // sead::MemUtil::isStack reads the stack base from the guest nn::os::ThreadType at +0x50 (the SDK's
+    // CreateThread records it there). Without it sead sees the region [0, size), thinks no name/pointer is
+    // on a stack, and Lp::UI::Impl::Name::init shares a caller's stack string instead of copying it.
+    *(u64*)(tt + 0x50) = stack_lo;
     t->h = GetCurrentThread(); t->tid = GetCurrentThreadId();
     t_self = t;
     (void)c;
@@ -135,6 +139,7 @@ static DWORD WINAPI thread_entry(LPVOID p) {
 HLE_AS(os_CreateThread, "_ZN2nn2os12CreateThreadEPNS0_10ThreadTypeEPFvPvES3_S3_mi") {
     HThread* t = g_threads.reset(c->x[0]);
     t->type = c->x[0]; t->fn = c->x[1]; t->arg = c->x[2]; t->stack = c->x[3]; t->stack_size = c->x[4]; t->prio = (int)c->x[5];
+    if (c->x[0]) *(u64*)(c->x[0] + 0x50) = c->x[3];   // sead::MemUtil::isStack reads the stack base here
     printf("[os] CreateThread %llx fn=%llx stack=%llx+%llx prio=%d\n", t->type, t->fn, t->stack, t->stack_size, t->prio);
     c->x[0] = 0;
 }
@@ -143,6 +148,7 @@ HLE_AS(os_CreateThread, "_ZN2nn2os12CreateThreadEPNS0_10ThreadTypeEPFvPvES3_S3_m
 HLE_AS(os_CreateThread7, "_ZN2nn2os12CreateThreadEPNS0_10ThreadTypeEPFvPvES3_S3_mii") {
     HThread* t = g_threads.reset(c->x[0]);
     t->type = c->x[0]; t->fn = c->x[1]; t->arg = c->x[2]; t->stack = c->x[3]; t->stack_size = c->x[4]; t->prio = (int)c->x[5];
+    if (c->x[0]) *(u64*)(c->x[0] + 0x50) = c->x[3];   // sead::MemUtil::isStack reads the stack base here
     printf("[os] CreateThread %llx fn=%llx stack=%llx+%llx prio=%d core=%d\n", t->type, t->fn, t->stack, t->stack_size,
            t->prio, (int)c->x[6]);
     c->x[0] = 0;

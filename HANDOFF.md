@@ -118,28 +118,29 @@ with `TOTK_LIFT_ALL=1`.
 
 ## Current blocker (first frame)
 
-`Cui::CustomizePartsSet::onInitialize` (`main 0x1d9530`) dereferences a null control at
-`main 0x1d95f8`. The name is `/L_ItemBtn_00` (crash-report `[stack]` scan). After a diagnostic
-skip, the page's own `onInitialize` fails on `/L_CustomizeIconBtn_00` — both families belong to
-the **one absent sub-layout `Cst_CustomizeDetail_00`**, which exists in the romfs
-(`Layout/`, `Sound/ResourceList/UI_Body_Cst_CustomizeDetail_00.barslist`) but is never queued.
+**The customize-page null is fixed (2026-11-15); the boot now advances well past it.** The root
+cause was not a layout at all: our `nn::os::CreateThread` HLE never wrote the stack base into the
+guest `nn::os::ThreadType` (offset `+0x50`), so `sead::MemUtil::isStack` (`main 0x13a1f30`) saw
+every thread's region as `[0, size)` and returned 0 for *every* pointer. `Lp::UI::Impl::Name::init`
+(`main 0x124351c`) uses that to decide copy-vs-share for control names; it therefore shared a
+caller stack pointer as the control name, which dangled, and `findPartsControl` returned null for
+every lookup (`/L_ItemBtn_00` was just the first). Fix (runtime only) in
+`baseline/totk-recomp/runtime/hle_os_thread.cpp`:
 
-Established (details and traces: `UI_BLOCKER_NOTES.md`):
+```c
+if (c->x[0]) *(u64*)(c->x[0] + 0x50) = c->x[3];   // CreateThread: ThreadType stack base
+*(u64*)(tt + 0x50) = stack_lo;                     // main thread
+```
 
-- page creation chain: `Lp::UI::UIMgr::prepare` → `Cstm::UIMgrCstm::onPrepare` →
-  `Cui::SystemPageMgr::initialize` → `createHandler<CustomizePageHandler>` →
-  `PageHandler::load("UI_Customize")` → `CustomizePageHandler::createPage` →
-  `PageHolder::createPage<CustomizeMainPage>` → `Page::initialize` → page `onInitialize`;
-- `PageHandler::load` calls `createPage()` **unconditionally**, so a short layout set does not
-  stop page creation;
-- `beginCreateSub("UI_Customize")` is a *named sead::ExpHeap* + `DualHeapAdapter` +
-  `LayoutResourceMgr::beginCreate`, **not** a resource load — hence no `UI_*.szs`;
-- every layout the game asked for was found (no `NOT FOUND`), so this is a **queue** difference;
-- language is ruled out: `nn::settings::eq` is now correctly implemented (it was a 0-returning
-  stub; arguments are *references*) and the layout set is unchanged.
+Effect: `isStack` returns 1 for stack sources, the customize page constructs, and the fs trace goes
+from 23 to ~93 unique layouts (`work/logs/boot-null-61.*`). Full write-up: `UI_BLOCKER_NOTES.md`
+("SOLVED 2026-11-15"). The two earlier hypotheses (operation mode; the absent
+`Cst_CustomizeDetail_00`) were both refuted with assets/traces there.
 
-Next candidates, in order: `nn::oe::GetOperationMode` (TV vs handheld can select handler sets),
-then the page-manager state that decides which handlers/pages exist at boot.
+**Next blocker: SDK service init.** The boot now reaches `nn::friends::Initialize`, whose lifted
+body calls `ConnectToNamedPort("sm:")`; our `svcConnectToNamedPort` returns "no such service", the
+SDK aborts, and the game hits `svc::Break` (`work/logs/boot-null-61.err`). This is an
+unimplemented service (HLE territory), not the UI.
 
 ## Runtime work already done (all game-agnostic; TotK behaviour preserved)
 

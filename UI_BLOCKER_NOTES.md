@@ -3,6 +3,100 @@
 State: the null and Vulkan builds both stop here, before the first frame. This note records what
 was established, including the decisive trace, so the next session does not repeat it.
 
+## 2026-11-15 update — the two earlier hypotheses are REFUTED; it is a control-name problem
+
+Two things ruled out with assets/traces, and the real proximate cause located:
+
+1. **Operation mode is not the selector.** `nn::oe::GetOperationMode` (HLE `hle_oe.cpp`) has only
+   two call sites in all of `main` (`0x123bbc0`, `0x123bd6c`, the nn::oe performance manager), and
+   forcing handheld (`TOTK_HANDHELD=1`) vs console gives an identical 23-layout set, identical
+   files, identical crash (logs `work/logs/boot-null-handheld.{log,err}` vs `…-console.*`).
+2. **`Cst_CustomizeDetail_00` is NOT the missing layout.** It was decompressed and checked
+   (`work/szs_list.py`, an in-repo Yaz0+SARC reader): `Layout/Cst_CustomizeTV_00.Nin_NX_NVN.szs`
+   → `blyt/Cst_CustomizeTV_00.bflyt` **contains panes `L_ItemBtn_00..23` and
+   `L_CustomIconBtn_00..04`** — exactly the names the two `onInitialize` functions look up.
+   `Cst_CustomizeDetail_00` contains `L_ItemDetail_*`, `L_Wpn_00`, `L_Parameter_00` — *not* the
+   item buttons. Those panes are `prt1` part panes of the TV layout. So the missing-layout framing
+   in the earlier notes (and in `HANDOFF.md`/`BOOT_SMOKE_NULL.md`) is wrong.
+3. **The generator drops no tail call.** `work/find-dropped-tailcalls-totk.py` (adapted from
+   `tools/rework/find-dropped-tailcalls.py`) reports `main: functions ending in b 20074, dropped 0`.
+   `f_20bd74` (`Cui::Page::findPartsControl`) emits its `b 0x20cf60` correctly.
+
+### The actual failure: the page's control list exists, but the controls' names are invalid
+
+Tracing `f_20bd74` → `f_20cf60` (`Control::List::searchAs<PartsCtrl>`) → `f_124b14c` (name lookup)
+with `TOTK_TRACE_STR=1` (`work/logs/boot-trace-41.log`) showed the search runs and returns 0:
+
+```
+> 710020bd74(10c0372bb0, ...) "/L_ItemBtn_00"      ; findPartsControl(page=10c0372bb0)
+> 710020cf60(10c0386518, ...) "/L_ItemBtn_00"      ; list = [page+0x3f0]+0x38
+> 710124b14c(10c0386518, 7102ff5d88, ...) "/L_ItemBtn_00"
+< 710124b14c = 0
+```
+
+Instrumenting `f_124b14c`'s loop in a scratch tree (`work/gen-totk/main-trace/`, kept for A/B)
+shows the list at `page+0x3f0` is **non-empty (~30 controls)** and the RTTI check at `0x124b1d0`
+**passes for every node**. What fails is the byte-for-byte *name* compare at `0x124b248`. For each
+node, `[node+0x20]` is the name `char*` and `[node+0x28]` packs `(len<<32)|hash`. The name pointers
+point into the UI thread's **stack** (`[os] CreateThread … stack=1002003000+100000`), and at search
+time most read back garbage:
+
+```
+[search] name node=10c0ff90e8 ptr=10021022cc len=13 hash=…  'q'
+[search] name node=10c111fee8 ptr=10021022fc len=12 hash=…  '/L_KeyIcon_00'
+```
+
+i.e. the registered controls hold name references into stack temporaries that have since been
+reused. The item/custom-icon part panes are not the special case — **every** lookup would fail
+because the names do not survive. `findPartsControl` returning null for `/L_ItemBtn_00` is a
+symptom of that, not of a missing layout.
+
+Open question (in progress): what sets a control's `[+0x20]` name field — a copy into the control's
+own/heap storage (which our port is losing), or a borrowed pointer to a caller `FixedSafeString`
+(the pane walker `f_1289594` builds one at `sp+0x30`)? The next step is to instrument the write and
+compare the pointer/content at write time vs search time.
+
+### SOLVED 2026-11-15: our `nn::os::CreateThread` never wrote the stack base into the guest `nn::os::ThreadType`
+
+The name field is written by `Lp::UI::Impl::Name::init` (`main 0x124351c`). For the `Control`
+constructor's `allocType == 0` it decides SHARE vs COPY with:
+
+```
+this_chars = ...; if (sead::MemUtil::isStack(this))      -> SHARE
+src_chars  = [src+8]; if (!sead::MemUtil::isStack(src))  -> SHARE   ; else COPY (heap alloc + memcpy)
+```
+
+So a *stack* source string is supposed to be **copied**. `sead::MemUtil::isStack` (`main 0x13a1f30`)
+returns 0 for every address in this port, so `Name::init` always took SHARE and stored a raw pointer
+into the caller's stack frame; when that frame was reused the name became garbage and
+`findPartsControl` returned null for every lookup.
+
+Why `isStack` returned 0: it computes each thread's region from the **guest `nn::os::ThreadType`**
+at `[[seadThread+0x224]+0x50]` (stack base) plus `s32[seadThread+0x88]` (stack size). Our
+`nn::os::CreateThread` HLE stored the stack in its own host-side `HThread` but never wrote it into
+the guest `ThreadType`, so every region was `[0, size)` and no stack pointer matched. A live probe
+at a stack lookup showed `t224=0x1002103020 t224_80=0 t136=0x100000` (ThreadType, base 0, size 1 MB).
+
+Fix (runtime/HLE only, game code untouched) — `runtime/hle_os_thread.cpp`:
+
+```c
+// in os_CreateThread / os_CreateThread7:
+if (c->x[0]) *(u64*)(c->x[0] + 0x50) = c->x[3];   // ThreadType stack base = the stack the game passed
+// in os_register_main_thread:
+*(u64*)(tt + 0x50) = stack_lo;
+```
+
+Result (`work/logs/boot-null-61.log/.err`, instrumented build `build-trace`):
+- `sead::MemUtil::isStack` now returns 1 for stack sources (`logs/bt62.log`: 234 × `ptr=100210292c -> 1`);
+- the customize page constructs, the fs trace goes from 23 to **~93** unique layouts, and the boot
+  no longer faults at `main 0x1d9530`;
+- the next blocker is `nn::friends::Initialize` → `ConnectToNamedPort("sm:")` fails →
+  `svc::Break` (`work/logs/boot-null-61.err`), i.e. an unimplemented service, not the UI.
+
+(Scratch instrumentation used for this lives in `work/gen-totk/main-trace/` and is not committed;
+`work/logs/boot-trace-*.log` hold the probes. `work/sym.py`, `work/szs_list.py`,
+`work/rela_vtable.py`, `work/find-dropped-tailcalls-totk.py` are the in-repo diagnostics used.)
+
 ## The crash
 
 `main 0x1d9530` (`Cui::CustomizePartsSet::onInitialize`) loops `i = 0..0x17`, formats
@@ -67,6 +161,10 @@ From `TOTK_TRACE_FS=1` and the `.bars`/`.barslist` resource names the engine loa
 * `Layout/Cst_CustomizeDetail_00.Nin_NX_NVN.szs` **exists in the romfs but is never opened**, and
   `Sound/ResourceList/UI_Body_Cst_CustomizeDetail_00.barslist` exists — i.e. the layout that owns
   the `/L_ItemBtn_*` controls is a real asset that this boot never requests.
+
+> **REFUTED 2026-11-15** (see the update at the top): the asset check shows `Cst_CustomizeTV_00`
+> itself contains `/L_ItemBtn_*` and `/L_CustomIconBtn_*` as `prt1` part panes, so the missing
+> `Cst_CustomizeDetail_00` is a red herring. The candidates below are kept only as history.
 
 So the question is now narrow: **why does the customize page group resolve to a set that omits
 `Cst_CustomizeDetail_00`?** Candidates, in order of likelihood:
